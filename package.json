@@ -1,0 +1,20 @@
+{
+  "name": "web-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Universal agent<->human rich-interaction layer for Claude Code: an MCP server that spins up a local web page for render/ask/stream.",
+  "bin": {
+    "web-agent-mcp": "src/mcp.js"
+  },
+  "scripts": {
+    "mcp": "node src/mcp.js",
+    "demo": "node demo/demo.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
