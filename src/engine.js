@@ -30,7 +30,8 @@ export class InteractionServer {
     this.url = null;
     this.clients = new Set();                // active SSE responses
     this.screen = null;                      // current screen object (for late joiners)
-    this.pending = null;                     // { id, resolve } for an in-flight ask()
+    this.transcript = [];                    // conversation log: [{role:'agent'|'user', text}]
+    this.pending = null;                     // { id, resolve } for an in-flight ask()/converse()
     this.streams = new Map();                // channel -> [values] (bounded history)
     this._page = framePage();
   }
@@ -74,6 +75,26 @@ export class InteractionServer {
     if (hist.length > MAX_HISTORY) hist.shift();
     this._broadcast('stream', { channel, value });
     return { ok: true };
+  }
+
+  // Speak to the user IN the panel (append an agent message to the transcript). Non-blocking.
+  // This is how the agent talks without the user reading the terminal.
+  say(text) {
+    const entry = { role: 'agent', text: String(text ?? '') };
+    this.transcript.push(entry);
+    this._broadcast('say', entry);
+    return { ok: true };
+  }
+
+  // Speak, then BLOCK until the user sends a chat message in the panel. Returns { text }.
+  // The loop of converse() calls keeps the agent parked so the session never needs the terminal.
+  converse(prompt) {
+    if (this.pending) { const p = this.pending; this.pending = null; p.reject?.(new Error('superseded by a new prompt')); }
+    if (prompt) this.say(prompt);
+    const id = randomUUID();
+    this.screen = { kind: 'chat', askId: id };
+    this._broadcast('screen', this.screen);
+    return new Promise((resolve, reject) => { this.pending = { id, resolve, reject }; });
   }
 
   waiting(message = 'Continuing…') {
@@ -121,7 +142,8 @@ export class InteractionServer {
     });
     res.write('retry: 1000\n\n');
     this.clients.add(res);
-    // Bring the newcomer up to date: current screen + any stream history.
+    // Bring the newcomer up to date: transcript, current screen, and any stream history.
+    for (const entry of this.transcript) this._send(res, 'say', entry);
     if (this.screen) this._send(res, 'screen', this.screen);
     for (const [channel, points] of this.streams) this._send(res, 'streamInit', { channel, points });
     const heartbeat = setInterval(() => { try { res.write(': ping\n\n'); } catch {} }, 20000);
@@ -135,8 +157,15 @@ export class InteractionServer {
     if (!this.pending || this.pending.id !== askId) {
       return json(res, 409, { error: 'no matching pending ask (already answered or superseded)' });
     }
+    const wasChat = this.screen && this.screen.kind === 'chat';
     const p = this.pending; this.pending = null;
-    this._broadcast('resolved', { message: 'Submitted — the agent is continuing.' });
+    if (value && typeof value.text === 'string' && value.text.trim()) {
+      // Echo the user's typed message into the transcript so the panel reads like a conversation.
+      const entry = { role: 'user', text: value.text.trim() };
+      this.transcript.push(entry);
+      this._broadcast('say', entry);
+    }
+    this._broadcast('resolved', { message: wasChat ? '' : 'Submitted — the agent is continuing.' });
     p.resolve(value);
     json(res, 200, { ok: true });
   }

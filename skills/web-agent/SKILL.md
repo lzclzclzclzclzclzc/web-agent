@@ -29,6 +29,26 @@ the panel when the content is **visual** (layouts, mockups, diagrams, comparison
 **spatial** (graphs, flows), **manipulable** (sliders/forms/drag), or **live** (values
 changing over time). These are categories, not an allowlist — invent new uses freely.
 
+## Terminal-free mode (run the whole conversation in the panel)
+
+When the user wants **0 terminal interaction** (everything in the browser — the `/web`
+command bootstraps this), the MAIN agent holds the conversation in the panel itself:
+
+- `say(text)` — speak to the user in the panel transcript (markdown-lite). Put ALL
+  user-facing output here; never rely on terminal text the user must read.
+- `converse(message?)` — post a message and **block until the user sends a chat reply** in
+  the panel; returns `{ text }`.
+
+The pattern is a loop: `say`/`converse` → do work → `say` results → `converse` again. Because
+`converse`/`ask` block, the agent stays parked in the browser and the user never touches the
+terminal. For richer input than chat (choices, sliders, a diagram to confirm, a custom
+interaction), delegate that step to the `web-ui` subagent (it renders into the same panel and
+returns the answer), then continue the loop.
+
+Caveat: the only unavoidable terminal action is the one command that starts the session; keep
+the loop alive (always end a step with `converse`/`ask`) so the agent never falls back to the
+terminal.
+
 ## How to use it — dispatch the `web-ui` subagent
 
 Spawn the **`web-ui`** subagent (via the Agent/Task tool) with a brief containing:

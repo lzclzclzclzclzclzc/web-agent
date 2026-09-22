@@ -178,6 +178,39 @@ server.registerTool('stream', {
   return { content: [{ type: 'text', text: `ok (${args.channel}=${args.value})` }] };
 });
 
+server.registerTool('say', {
+  title: 'Say something in the panel',
+  description: 'Append an agent message to the panel conversation transcript (markdown-lite: **bold**, `code`). Non-blocking. Use this to talk to the user IN the browser instead of the terminal — the foundation of a terminal-free session. Follow with `converse` to wait for their reply.',
+  inputSchema: { text: z.string() },
+}, async (args) => {
+  await ensureEngine();
+  openBrowser(engine.url);
+  engine.say(args.text);
+  return { content: [{ type: 'text', text: 'ok' }] };
+});
+
+server.registerTool('converse', {
+  title: 'Say + wait for the user\'s reply (blocking)',
+  description: 'Post an optional message to the transcript, then BLOCK until the user sends a chat message in the panel; returns { text }. This is the terminal-free conversation loop: keep calling converse so the agent stays parked in the browser and the user never needs the terminal. For structured input (choices/sliders/custom UI) use `ask` instead.',
+  inputSchema: { message: z.string().optional().describe('agent message shown before waiting (omit to just wait)') },
+}, async (args, extra) => {
+  await ensureEngine();
+  openBrowser(engine.url);
+  const pending = engine.converse(args.message);
+  if (extra?.signal) {
+    if (extra.signal.aborted) engine.cancelPending('client aborted');
+    else extra.signal.addEventListener('abort', () => engine.cancelPending('client aborted'), { once: true });
+  }
+  const beat = setInterval(() => {
+    try { extra?.sendNotification?.({ method: 'notifications/progress',
+      params: { progressToken: extra?._meta?.progressToken ?? 'web-agent', progress: 0 } }); } catch {}
+  }, 15000);
+  try {
+    const answer = await pending;
+    return { content: [{ type: 'text', text: `User: ${answer?.text ?? ''}\n\n${JSON.stringify(answer)}` }] };
+  } finally { clearInterval(beat); }
+});
+
 // ---- boot --------------------------------------------------------------
 // Optional: expose the panel as an MCP Apps ui:// resource for GUI hosts (experimental,
 // off by default; Claude Code CLI cannot render iframes so it uses the self-hosted page).
