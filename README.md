@@ -7,7 +7,7 @@ stream live data — for when a text-only reply isn't enough.
 | Tool | What it does | Blocks? |
 |------|--------------|---------|
 | `open_panel` | start the page, return its URL | no |
-| `say` | append an agent message to the panel transcript (talk to the user in the browser) | no |
+| `say` | show an agent message as the current screen (talk to the user in the browser) | no |
 | `converse` | say + **wait for the user's chat reply** in the panel | **yes** |
 | `render` | push a screen: declarative content, live-metrics panel, trusted freehand HTML (`html`/`htmlPath`), or a full custom interactive document (`doc`/`docPath`) | no |
 | `ask` | push a screen (options / controls / actions / free-text, or a custom document) and **wait until the user submits**, then return their answer | **yes** |
@@ -26,10 +26,11 @@ actually waiting on an `ask`.
 ## Terminal-free mode
 
 Run `/web` to move the **entire conversation into the panel** — the agent talks via `say`,
-waits for your replies via `converse` (a persistent chat composer), and stays parked in the
-browser so you never look at or type in the terminal. Rich steps (choices, sliders, custom
-interactions) are delegated to the `web-ui` subagent and rendered in the same panel. The only
-terminal action is the one `/web` command that bootstraps the session.
+asks free-form questions via `converse` (an inline text box on that screen), and uses `ask`
+for richer input. The panel shows **one screen at a time** (each step replaces the last —
+nothing accumulates) with a single fixed **Submit** button, so it never turns into a
+docked-composer chat log. The only terminal action is the one `/web` command that bootstraps
+the session.
 
 ## Try it now (no MCP wiring needed)
 

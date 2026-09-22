@@ -180,7 +180,7 @@ server.registerTool('stream', {
 
 server.registerTool('say', {
   title: 'Say something in the panel',
-  description: 'Append an agent message to the panel conversation transcript (markdown-lite: **bold**, `code`). Non-blocking. Use this to talk to the user IN the browser instead of the terminal — the foundation of a terminal-free session. Follow with `converse` to wait for their reply.',
+  description: 'Show an agent message as the current panel screen (markdown-lite: **bold**, `code`). Non-blocking; the next render/ask/converse replaces it. Use to tell the user something in the browser instead of the terminal.',
   inputSchema: { text: z.string() },
 }, async (args) => {
   await ensureEngine();
@@ -190,9 +190,9 @@ server.registerTool('say', {
 });
 
 server.registerTool('converse', {
-  title: 'Say + wait for the user\'s reply (blocking)',
-  description: 'Post an optional message to the transcript, then BLOCK until the user sends a chat message in the panel; returns { text }. This is the terminal-free conversation loop: keep calling converse so the agent stays parked in the browser and the user never needs the terminal. For structured input (choices/sliders/custom UI) use `ask` instead.',
-  inputSchema: { message: z.string().optional().describe('agent message shown before waiting (omit to just wait)') },
+  title: 'Ask a free-form chat question (blocking)',
+  description: 'Show a message with an inline text box, then BLOCK until the user sends a reply; returns { text }. This is the free-form conversation form — one of several interaction forms (use `ask` for choices/sliders/custom UI). Nothing accumulates: the screen is replaced on your next call.',
+  inputSchema: { message: z.string().optional().describe('agent message shown above the input (omit to just show a box)') },
 }, async (args, extra) => {
   await ensureEngine();
   openBrowser(engine.url);

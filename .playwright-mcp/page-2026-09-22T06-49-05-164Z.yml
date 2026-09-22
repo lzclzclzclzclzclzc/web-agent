@@ -1,0 +1,10 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e4]: web-agent
+    - generic [ref=e5]: connected
+  - main [ref=e6]:
+    - generic [ref=e7]: What should we build first?
+    - textbox "Type your message… (Enter to send, Shift+Enter for newline)" [ref=e8]
+  - generic [ref=e9]:
+    - generic [ref=e10]: Type your reply, then Send (or press Enter).
+    - button "Send" [ref=e11] [cursor=pointer]

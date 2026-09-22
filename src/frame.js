@@ -1,15 +1,17 @@
 // frame.js — the single-page frame served to the browser.
 //
-// The panel doubles as the whole conversation surface so the user never needs the terminal:
-//   * a persistent TRANSCRIPT (agent messages via say(), user messages echoed on send)
-//   * a persistent COMPOSER (textarea + Send) at the bottom — enabled whenever the agent is
-//     waiting (converse()/ask()); disabled with "working…" otherwise
-//   * a SCREEN area for the current interaction: declarative options/controls/actions,
-//     a live-metrics panel, trusted freehand HTML, or a full CUSTOM document in a sandboxed
-//     iframe (its own JS, talking back through the injected `webagent` bridge)
+// SCREEN model: the panel shows ONE screen at a time (each render/ask/converse/say REPLACES
+// the previous — nothing accumulates). A single persistent Submit button sits bottom-right
+// and is enabled only while the agent is waiting on input. Conversation is just one screen
+// kind ('chat', an inline message + text box) — not a permanent chat log or docked composer.
 //
-//   server -> browser : Server-Sent Events on GET /events   (say / screen / stream / resolved)
-//   browser -> server : POST /submit (answers)  |  POST /ingest (external stream data)
+// Screen kinds:
+//   view  — say()/render(): message / content / freehand HTML / custom doc / live charts (no wait)
+//   ask   — render/ask interaction: options / controls / actions / freeText / custom doc (waits)
+//   chat  — converse(): an agent message + an inline text input (waits)
+//
+//   server -> browser : SSE on GET /events (screen / stream / resolved)
+//   browser -> server : POST /submit (answers) | POST /ingest (external stream data)
 
 export function framePage() {
   return `<!DOCTYPE html>
@@ -25,27 +27,19 @@ export function framePage() {
     --radius:12px;
   }
   * { box-sizing:border-box; }
-  html,body { height:100%; }
-  body { margin:0; background:var(--bg); color:var(--fg); display:flex; flex-direction:column;
+  body { margin:0; background:var(--bg); color:var(--fg);
     font:15px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
   header { padding:14px 22px; border-bottom:1px solid var(--line);
-    display:flex; align-items:center; gap:10px; background:var(--panel); flex:0 0 auto; }
+    display:flex; align-items:center; gap:10px; background:var(--panel); position:sticky; top:0; z-index:5; }
   header .dot { width:9px; height:9px; border-radius:50%; background:var(--muted); }
   header .dot.live { background:var(--ok); box-shadow:0 0 8px var(--ok); }
   header b { font-weight:600; letter-spacing:.3px; }
   header .status { margin-left:auto; color:var(--muted); font-size:12px; }
-  main { flex:1 1 auto; overflow-y:auto; }
-  .wrap { max-width:900px; margin:0 auto; padding:24px 22px 8px; }
-
-  /* transcript */
-  #transcript { display:flex; flex-direction:column; gap:12px; margin-bottom:18px; }
-  .bubble { max-width:82%; padding:12px 15px; border-radius:14px; white-space:pre-wrap; word-wrap:break-word; }
-  .bubble.agent { align-self:flex-start; background:var(--panel); border:1px solid var(--line); border-bottom-left-radius:4px; }
-  .bubble.user { align-self:flex-end; background:var(--accent); color:#fff; border-bottom-right-radius:4px; }
-  .bubble code { background:rgba(255,255,255,.12); padding:1px 5px; border-radius:5px; font-size:.92em; }
-
-  h2 { margin:0 0 4px; font-size:21px; }
-  .subtitle { color:var(--muted); margin:0 0 18px; }
+  main { max-width:900px; margin:0 auto; padding:28px 22px 120px; }
+  h2 { margin:0 0 4px; font-size:22px; }
+  .subtitle { color:var(--muted); margin:0 0 20px; }
+  .message { font-size:16px; white-space:pre-wrap; margin-bottom:18px; }
+  .message code { background:rgba(255,255,255,.1); padding:1px 5px; border-radius:5px; }
   .option { display:flex; gap:14px; align-items:flex-start; padding:15px 18px; border:1.5px solid var(--line);
     border-radius:var(--radius); background:var(--panel); cursor:pointer; margin-bottom:12px; transition:border-color .12s, background .12s; }
   .option:hover { border-color:var(--accent); }
@@ -60,9 +54,9 @@ export function framePage() {
   .control .row { display:flex; align-items:center; gap:12px; }
   .control input[type=range] { flex:1; accent-color:var(--accent); }
   .control .cval { min-width:52px; text-align:right; font-variant-numeric:tabular-nums; font-weight:600; }
-  input[type=text], input[type=number], select, .freetext textarea { width:100%; padding:11px 13px;
-    background:var(--panel); color:var(--fg); border:1.5px solid var(--line); border-radius:var(--radius); font:inherit; }
-  .freetext textarea { min-height:80px; resize:vertical; }
+  input[type=text], input[type=number], select, textarea { width:100%; padding:12px 14px; background:var(--panel);
+    color:var(--fg); border:1.5px solid var(--line); border-radius:var(--radius); font:inherit; }
+  textarea { min-height:88px; resize:vertical; }
   input:focus, select:focus, textarea:focus { outline:none; border-color:var(--accent); }
   .actions { display:flex; flex-wrap:wrap; gap:10px; margin:16px 0 4px; }
   .actions button { background:var(--panel2); color:var(--fg); border:1.5px solid var(--line); padding:10px 18px;
@@ -70,25 +64,24 @@ export function framePage() {
   .actions button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
   .actions button:hover { border-color:var(--accent); }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:18px; }
-  iframe#customframe { width:100%; border:0; min-height:55vh; background:transparent; }
+  iframe#customframe { width:100%; border:0; min-height:58vh; background:transparent; }
   .charts { display:grid; gap:16px; grid-template-columns:1fr; }
   @media(min-width:680px){ .charts.multi { grid-template-columns:1fr 1fr; } }
   .chart h4 { margin:0 0 2px; font-size:13px; color:var(--muted); font-weight:600; }
   .chart .val { font-size:22px; font-weight:700; }
   .chart svg { width:100%; height:120px; display:block; margin-top:6px; }
   .rawhtml :is(h1,h2,h3){ color:var(--fg); }
+  .center { min-height:40vh; display:flex; align-items:center; justify-content:center; color:var(--muted); text-align:center; }
 
-  /* composer */
-  #bar { flex:0 0 auto; border-top:1px solid var(--line); background:var(--panel); }
-  #barwrap { max-width:900px; margin:0 auto; padding:12px 22px; display:flex; gap:10px; align-items:flex-end; }
-  #composer { flex:1; min-height:46px; max-height:180px; padding:12px 14px; background:var(--bg); color:var(--fg);
-    border:1.5px solid var(--line); border-radius:12px; font:inherit; resize:none; }
-  #composer:focus { outline:none; border-color:var(--accent); }
-  #composer:disabled { opacity:.55; }
-  #send { background:var(--accent); color:#fff; border:none; padding:0 24px; height:46px; font-size:15px;
-    font-weight:700; border-radius:12px; cursor:pointer; }
-  #send:disabled { background:var(--panel2); color:var(--muted); cursor:not-allowed; }
-  #toast { position:fixed; left:50%; bottom:84px; transform:translateX(-50%); background:var(--panel2);
+  #submitbar { position:fixed; right:24px; bottom:24px; z-index:20; display:flex; align-items:center; gap:12px; }
+  #submithint { color:var(--muted); font-size:12px; background:var(--panel); border:1px solid var(--line); padding:6px 10px; border-radius:8px; max-width:260px; }
+  #submit { background:var(--accent); color:#fff; border:none; padding:13px 26px; font-size:15px; font-weight:700;
+    border-radius:12px; cursor:pointer; box-shadow:0 6px 20px rgba(79,140,255,.35); transition:transform .1s, opacity .15s; }
+  #submit:hover:not(:disabled) { transform:translateY(-1px); }
+  #submit:disabled { background:var(--panel2); color:var(--muted); cursor:not-allowed; box-shadow:none; }
+  #submit.waiting { animation:pulse 1.8s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{ box-shadow:0 6px 20px rgba(79,140,255,.35);} 50%{ box-shadow:0 6px 28px rgba(79,140,255,.7);} }
+  #toast { position:fixed; left:50%; bottom:90px; transform:translateX(-50%); background:var(--panel2);
     border:1px solid var(--line); color:var(--fg); padding:10px 16px; border-radius:10px; font-size:13px;
     opacity:0; transition:opacity .2s; pointer-events:none; z-index:30; }
   #toast.show { opacity:1; }
@@ -100,30 +93,26 @@ export function framePage() {
   <b>web-agent</b>
   <span class="status" id="status">connecting…</span>
 </header>
-<main><div class="wrap">
-  <div id="transcript"></div>
-  <div id="screen"></div>
-</div></main>
+<main id="app"><div class="center">Waiting for the agent…</div></main>
 
-<div id="bar"><div id="barwrap">
-  <textarea id="composer" rows="1" placeholder="web-agent is working…" disabled></textarea>
-  <button id="send" disabled>Send</button>
-</div></div>
+<div id="submitbar">
+  <span id="submithint">The agent isn't waiting for input yet.</span>
+  <button id="submit" disabled>Submit</button>
+</div>
 <div id="toast"></div>
 
 <script>
-const transcriptEl = document.getElementById('transcript');
-const screenEl = document.getElementById('screen');
+const app = document.getElementById('app');
 const statusEl = document.getElementById('status');
 const connDot = document.getElementById('conn');
-const composer = document.getElementById('composer');
-const sendBtn = document.getElementById('send');
+const submitBtn = document.getElementById('submit');
+const submitHint = document.getElementById('submithint');
 const toastEl = document.getElementById('toast');
 
-let current = null;            // current screen object
-let activeAskId = null;        // non-null while the agent awaits input
+let current = null;
+let activeAskId = null;
 let selected = new Set();
-let stageFrame = null;         // sandboxed iframe when in custom mode
+let stageFrame = null;
 const charts = new Map();
 const streamHist = {};
 
@@ -131,15 +120,8 @@ function esc(s){ return String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':
 function mdLite(s){ return esc(s).replace(/\`([^\`]+)\`/g,'<code>$1</code>').replace(/\\*\\*([^*]+)\\*\\*/g,'<b>$1</b>'); }
 function toast(msg){ toastEl.textContent=msg; toastEl.classList.add('show');
   clearTimeout(toast._t); toast._t=setTimeout(()=>toastEl.classList.remove('show'),2200); }
-function scrollDown(){ const m=document.querySelector('main'); m.scrollTop=m.scrollHeight; }
 
-// ---- transcript --------------------------------------------------------
-function addBubble(role, text){
-  const b=document.createElement('div'); b.className='bubble '+(role==='user'?'user':'agent');
-  b.innerHTML = mdLite(text); transcriptEl.appendChild(b); scrollDown();
-}
-
-// ---- the sandboxed custom-UI bridge (runs INSIDE the iframe) -----------
+// ---- custom-UI bridge (runs INSIDE the sandboxed iframe) ---------------
 function bridgeFn(){
   var collector=null, streamCb=null;
   function send(m){ m.__wa=1; parent.postMessage(m,'*'); }
@@ -170,27 +152,36 @@ function buildDoc(content){
     '<style>'+base+'</style><script>'+bridge+'<\\/script></head><body>'+(content||'')+'</body></html>';
 }
 
-// ---- screen rendering (into #screen only; transcript persists) ---------
+// ---- screen rendering (each screen REPLACES the last) ------------------
 function renderScreen(s){
   current = s; selected = new Set(); stageFrame = null;
-  screenEl.innerHTML = '';
-  if (!s || s.kind === 'chat'){ setActive(s ? s.askId : null); return; }
+  app.innerHTML = '';
+  if (!s){ app.innerHTML = '<div class="center">Waiting for the agent…</div>'; setAsk(null); return; }
 
-  if (s.title){ const h=document.createElement('h2'); h.textContent=s.title; screenEl.appendChild(h); }
-  if (s.subtitle){ const p=document.createElement('p'); p.className='subtitle'; p.textContent=s.subtitle; screenEl.appendChild(p); }
+  if (s.message){ const m=document.createElement('div'); m.className='message'; m.innerHTML=mdLite(s.message); app.appendChild(m); }
+  if (s.title){ const h=document.createElement('h2'); h.textContent=s.title; app.appendChild(h); }
+  if (s.subtitle){ const p=document.createElement('p'); p.className='subtitle'; p.textContent=s.subtitle; app.appendChild(p); }
 
-  if (s.doc){ renderCustom(s); setActive(s.kind === 'ask' ? s.askId : null); return; }
+  if (s.doc){ renderCustom(s); setAsk(s.kind === 'ask' ? s : null); return; }
 
-  if (s.html){ const d=document.createElement('div'); d.className='rawhtml card'; d.innerHTML=s.html; screenEl.appendChild(d); }
+  if (s.kind === 'chat'){ renderChat(s); setAsk(s); return; }
+
+  if (s.html){ const d=document.createElement('div'); d.className='rawhtml card'; d.innerHTML=s.html; app.appendChild(d); }
   if (s.charts && s.charts.length){ mountCharts(s.charts); }
   if (s.kind === 'ask'){ renderAsk(s); }
-  setActive(s.kind === 'ask' ? s.askId : null);
-  scrollDown();
+  setAsk(s.kind === 'ask' ? s : null);
+}
+
+function renderChat(s){
+  const ta=document.createElement('textarea'); ta.id='chat-input';
+  ta.placeholder = s.placeholder || 'Type your message… (Enter to send, Shift+Enter for newline)';
+  ta.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); doSubmit(null); } });
+  app.appendChild(ta); setTimeout(()=>ta.focus(), 30);
 }
 
 function renderCustom(s){
   const f=document.createElement('iframe'); f.id='customframe'; f.setAttribute('sandbox','allow-scripts');
-  f.srcdoc = buildDoc(s.doc || ''); screenEl.appendChild(f); stageFrame = f;
+  f.srcdoc = buildDoc(s.doc || ''); app.appendChild(f); stageFrame = f;
 }
 
 function renderAsk(s){
@@ -200,13 +191,12 @@ function renderAsk(s){
     el.innerHTML = '<div class="letter">'+(opt.letter||letters[i]||'•')+'</div>'+
       '<div><h3>'+esc(opt.label)+'</h3>'+(opt.description?'<p>'+esc(opt.description)+'</p>':'')+'</div>';
     el.onclick = () => toggle(el, s.multiSelect);
-    screenEl.appendChild(el);
+    app.appendChild(el);
   });
   if (s.controls && s.controls.length) renderControls(s.controls);
   if (s.freeText && s.freeText.enabled){
-    const wrap=document.createElement('div'); wrap.className='freetext';
     const ta=document.createElement('textarea'); ta.id='freetext-input';
-    ta.placeholder = s.freeText.placeholder || 'Type here…'; wrap.appendChild(ta); screenEl.appendChild(wrap);
+    ta.placeholder = s.freeText.placeholder || 'Type here…'; app.appendChild(ta);
   }
   if (s.actions && s.actions.length) renderActions(s.actions);
 }
@@ -242,7 +232,7 @@ function renderControls(controls){
     }
     box.appendChild(wrap);
   });
-  screenEl.appendChild(box);
+  app.appendChild(box);
 }
 
 function renderActions(actions){
@@ -253,7 +243,7 @@ function renderActions(actions){
     b.onclick=()=>submitNow(a.id);
     box.appendChild(b);
   });
-  screenEl.appendChild(box);
+  app.appendChild(box);
 }
 
 function toggle(el, multi){
@@ -263,25 +253,29 @@ function toggle(el, multi){
   else { el.classList.add('selected'); selected.add(id); }
 }
 
-// ---- composer / submit -------------------------------------------------
-function setActive(askId){
-  activeAskId = askId || null;
-  const on = !!activeAskId;
-  composer.disabled = !on; sendBtn.disabled = !on;
-  const custom = on && current && current.doc;
-  composer.placeholder = on
-    ? (custom ? 'Interact in the panel, then Send…' : 'Type your message… (Enter to send, Shift+Enter for newline)')
-    : 'web-agent is working…';
-  sendBtn.textContent = (on && current && current.kind !== 'chat') ? 'Submit' : 'Send';
-  if (on && !custom) setTimeout(()=>composer.focus(), 30);
+// ---- the persistent Submit button --------------------------------------
+function setAsk(s){
+  if (s){
+    activeAskId = s.askId;
+    submitBtn.disabled = false; submitBtn.classList.add('waiting');
+    submitBtn.textContent = s.submitLabel || (s.kind === 'chat' ? 'Send' : 'Submit');
+    submitHint.textContent = s.doc ? 'Interact in the panel, then Submit (or the panel may submit itself).'
+      : (s.kind === 'chat' ? 'Type your reply, then Send (or press Enter).'
+      : 'Make your choice above, then Submit.');
+  } else {
+    activeAskId = null;
+    submitBtn.disabled = true; submitBtn.classList.remove('waiting');
+    submitBtn.textContent = 'Submit';
+    submitHint.textContent = "The agent isn't waiting for input yet.";
+  }
 }
 
 function collectValue(action){
-  const value = { action: action ?? null, selected:[...selected], selectedLabels:[], text: composer.value.trim(), fields:{} };
+  const value = { action: action ?? null, selected:[...selected], selectedLabels:[], text:'', fields:{} };
   value.selectedLabels = (current?.options||[])
     .filter(o => selected.has(String(o.id)) || selected.has(o.id)).map(o => o.label);
-  screenEl.querySelectorAll('input, textarea, select').forEach(el => {
-    const key = el.name || el.id; if (!key) return;
+  app.querySelectorAll('input, textarea, select').forEach(el => {
+    const key = el.name || el.id; if (!key || key==='chat-input' || key==='freetext-input') { return; }
     let v;
     if (el.type === 'checkbox') v = el.checked;
     else if (el.type === 'radio'){ if (!el.checked) return; v = el.value; }
@@ -289,12 +283,14 @@ function collectValue(action){
     else v = el.value;
     value.fields[key] = v;
   });
+  const chat = document.getElementById('chat-input');
+  const ft = document.getElementById('freetext-input');
+  value.text = (chat ? chat.value : (ft ? ft.value : '')).trim();
   return value;
 }
 
 async function submitToServer(value){
-  const askId = activeAskId;
-  setActive(null); composer.value = '';
+  const askId = activeAskId; setAsk(null);
   try {
     const r = await fetch('/submit', { method:'POST', headers:{'content-type':'application/json'},
       body: JSON.stringify({ askId, value }) });
@@ -302,26 +298,20 @@ async function submitToServer(value){
   } catch(e){ toast('Network error while submitting.'); }
 }
 
-// send from the composer / Send button (chat or declarative)
-function doSend(){
-  if (!activeAskId) return;
+function doSubmit(action){
+  if (!activeAskId){ toast("The agent isn't waiting for input right now."); return; }
   if (current && current.doc){ if (stageFrame) stageFrame.contentWindow.postMessage({ __wa:1, type:'collect' }, '*'); return; }
-  const v = collectValue(null);
+  const v = collectValue(action);
   if (current && current.kind === 'chat' && !v.text){ toast('Type a message first.'); return; }
   submitToServer(v);
 }
-// immediate submit from a declarative action button
 function submitNow(action){ if (activeAskId) submitToServer(collectValue(action)); }
-
-sendBtn.addEventListener('click', doSend);
-composer.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); doSend(); }
-});
+submitBtn.addEventListener('click', () => doSubmit(null));
 
 // messages from the sandboxed custom iframe
 window.addEventListener('message', (e) => {
   const m = e.data; if (!m || m.__wa !== 1) return;
-  if (m.type === 'submit'){ if (activeAskId){ const v = m.value; if (v && typeof v==='object' && composer.value.trim() && v.text===undefined) v.text = composer.value.trim(); submitToServer(v); } }
+  if (m.type === 'submit'){ if (activeAskId) submitToServer(m.value); }
   else if (m.type === 'height'){ if (stageFrame && m.px) stageFrame.style.height = Math.min(m.px + 8, 4000) + 'px'; }
   else if (m.type === 'ready'){ if (stageFrame) for (const ch in streamHist)
     stageFrame.contentWindow.postMessage({ __wa:1, type:'streamInit', channel:ch, points:streamHist[ch] }, '*'); }
@@ -337,7 +327,7 @@ function mountCharts(defs){
     box.appendChild(c);
     charts.set(def.channel, { points:[], val:c.querySelector('[data-val]'), path:c.querySelector('[data-path]') });
   });
-  screenEl.appendChild(box);
+  app.appendChild(box);
 }
 function pushPoint(channel, value){
   const ch = charts.get(channel); if (!ch) return;
@@ -360,13 +350,12 @@ function forwardStream(channel, value){
 function connect(){
   const es = new EventSource('/events');
   es.addEventListener('open', ()=>{ connDot.classList.add('live'); statusEl.textContent='connected'; });
-  es.addEventListener('say', e => { const m=JSON.parse(e.data); addBubble(m.role, m.text); });
   es.addEventListener('screen', e => renderScreen(JSON.parse(e.data)));
   es.addEventListener('streamInit', e => { const {channel, points}=JSON.parse(e.data);
     streamHist[channel] = (points||[]).slice(); (points||[]).forEach(v=>pushPoint(channel,v));
     if (stageFrame) stageFrame.contentWindow.postMessage({ __wa:1, type:'streamInit', channel, points }, '*'); });
   es.addEventListener('stream', e => { const {channel, value}=JSON.parse(e.data); forwardStream(channel, value); });
-  es.addEventListener('resolved', e => { const {message}=JSON.parse(e.data||'{}'); setActive(null); if(message) toast(message); });
+  es.addEventListener('resolved', e => { setAsk(null); });
   es.onerror = () => { connDot.classList.remove('live'); statusEl.textContent='reconnecting…'; };
 }
 connect();
