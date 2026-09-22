@@ -215,3 +215,19 @@ Claude Code 子 agent 有独立 context（其 token 不进父 agent 历史），
 - MCP Apps 扩展 2026-01-26：modelcontextprotocol/ext-apps（README + `specification/2026-01-26/apps.mdx`）；社区前身 idosal/mcp-ui。
 - Claude Code：扩展面（skills / hooks / plugins / MCP / subagents）、closed-source、`asyncRewake` hook、SDK stream input（code.claude.com/docs，部分待二次核对）。
 - 对抗核验（均 confirmed）：①阻塞式 MCP 工具令网页提交在同一回合恢复 agent；②纯 skill 无法令点击唤醒 agent；③委托自由 HTML 给子 agent 使其不进父 context；④子 agent 能调 MCP 工具并替父 agent 阻塞等待。
+
+---
+
+## 12. 实现状态（v1，2026-09-22）
+
+已实现并验证（代码在仓库根 `src/`、`demo/`、`agents/`、`skills/`）：
+
+- **MCP server**（`src/mcp.js`，官方 SDK）暴露 `open_panel / render / ask / stream`；已用真实 MCP 客户端 stdio 握手验证（列工具 + 调用成功）。
+- **本地 web 引擎**（`src/engine.js`，零依赖 HTTP+SSE）：`ask` 长挂→提交解析、`stream` 广播、外部 `/ingest`、favicon 204，均 headless 验证。
+- **固定右下角 Submit 按钮 + 通用收集器**（`src/frame.js`）：按用户要求，交互完点固定按钮才回传;无 ask 时自动禁用。浏览器端已验证。
+- **`on` 原语**：声明式 `controls`（slider/number/checkbox/text/select，收进 `answer.fields`）+ 立即提交的 `actions`（`answer.action`）。浏览器端验证：拨滑块→点 Approve 立即带值提交。
+- **UI-author 路径**：`render({htmlPath})` handle 化 + `agents/ui-author.md` 子 agent 定义 + `skills/web-agent/SKILL.md` 播报手册。
+- **可插拔渲染面 + MCP Apps 适配**（`src/mcp-apps.js`）：`WEB_AGENT_MCP_APPS=1` 时注册 `ui://web-agent/panel` 资源;默认关闭、非破坏（已验证开关两态）。
+- **接入**：`claude mcp add web-agent --scope user`，`✓ Connected`;子 agent 与 skill 安装到 `~/.claude/`。
+
+架构性未尽（诚实标注）：MCP Apps 的宿主侧 iframe↔工具 JSON-RPC 桥是宿主相关、且终端 Claude Code CLI 无法渲染 iframe，故该路径为脚手架、未在 CLI 目标运行时验证。`on` 的"render 期间即时唤醒 agent"受回合模型限制不做（需 agent 卡在 ask 内）。

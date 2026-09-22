@@ -14,7 +14,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { InteractionServer } from './engine.js';
+import { maybeRegisterMcpApps } from './mcp-apps.js';
 
 const log = (...a) => console.error('[web-agent]', ...a);
 
@@ -67,23 +69,30 @@ const chartsSchema = z.array(z.object({
 
 server.registerTool('render', {
   title: 'Render a screen',
-  description: 'Push a screen to the panel and return immediately (does NOT wait). Use for showing content, mockups, or setting up a live-metrics panel (declare charts here, then push data with stream). `html` is trusted markup you author under the agent-web contract (localhost-only, no secrets, no external calls).',
+  description: 'Push a screen to the panel and return immediately (does NOT wait). Use for showing content, mockups, or setting up a live-metrics panel (declare charts here, then push data with stream). `html` is trusted markup you author under the agent-web contract (localhost-only, no secrets, no external calls). For large/bespoke UI, prefer delegating authoring to the `ui-author` subagent and passing `htmlPath` (the file it wrote) so the verbose markup never enters your context.',
   inputSchema: {
     title: z.string().optional(),
     subtitle: z.string().optional(),
     html: z.string().optional().describe('freehand HTML body (for bespoke mockups/diagrams)'),
+    htmlPath: z.string().optional().describe('path to an HTML file to render (handle-based; e.g. written by the ui-author subagent)'),
     charts: chartsSchema,
   },
 }, async (args) => {
   await ensureEngine();
   openBrowser(engine.url);
-  engine.render(args);
+  const view = { ...args };
+  if (args.htmlPath) {
+    try { view.html = readFileSync(args.htmlPath, 'utf8'); }
+    catch (e) { return { isError: true, content: [{ type: 'text', text: `Could not read htmlPath: ${e.message}` }] }; }
+    delete view.htmlPath;
+  }
+  engine.render(view);
   return { content: [{ type: 'text', text: `Rendered "${args.title || '(untitled)'}". ${urlLine()}` }] };
 });
 
 server.registerTool('ask', {
   title: 'Ask the user (blocking)',
-  description: 'Push a screen with options and/or a free-text box, then BLOCK until the user submits in the browser. Returns their answer. Because this call blocks, you resume in the SAME turn the moment they submit — no terminal input needed. Prefer declarative options/freeText over freehand HTML.',
+  description: 'Push a screen with options, form controls, action buttons and/or a free-text box, then BLOCK until the user submits in the browser. Returns their answer. Because this call blocks, you resume in the SAME turn the moment they submit — no terminal input needed. `controls` are declarative widgets (slider/number/checkbox/text/select) collected into answer.fields (the `on` primitive — e.g. drag a slider to tune a param). `actions` are buttons that submit immediately with answer.action set (e.g. Approve/Reject). Prefer declarative options/controls over freehand HTML.',
   inputSchema: {
     title: z.string(),
     subtitle: z.string().optional(),
@@ -93,6 +102,22 @@ server.registerTool('ask', {
       description: z.string().optional(),
     })).optional(),
     multiSelect: z.boolean().optional(),
+    controls: z.array(z.object({
+      id: z.string().describe('key under which the value is returned in answer.fields'),
+      type: z.enum(['slider', 'range', 'number', 'checkbox', 'text', 'select']),
+      label: z.string().optional(),
+      min: z.number().optional(),
+      max: z.number().optional(),
+      step: z.number().optional(),
+      value: z.union([z.string(), z.number(), z.boolean()]).optional(),
+      placeholder: z.string().optional(),
+      options: z.array(z.union([z.string(), z.object({ value: z.string(), label: z.string().optional() })])).optional(),
+    })).optional(),
+    actions: z.array(z.object({
+      id: z.string(),
+      label: z.string().optional(),
+      primary: z.boolean().optional(),
+    })).optional(),
     freeText: z.object({
       enabled: z.boolean(),
       placeholder: z.string().optional(),
@@ -120,8 +145,11 @@ server.registerTool('ask', {
 
   try {
     const answer = await pending;
+    const fieldKeys = answer.fields ? Object.keys(answer.fields).filter(k => k !== 'freetext-input') : [];
     const summary = [
+      answer.action ? `action: ${answer.action}` : null,
       answer.selectedLabels?.length ? `selected: ${answer.selectedLabels.join(', ')}` : null,
+      fieldKeys.length ? `fields: ${fieldKeys.map(k => `${k}=${answer.fields[k]}`).join(', ')}` : null,
       answer.text ? `text: ${answer.text}` : null,
     ].filter(Boolean).join(' | ') || '(empty submission)';
     return { content: [{ type: 'text', text: `User submitted — ${summary}\n\n${JSON.stringify(answer)}` }] };
@@ -144,6 +172,10 @@ server.registerTool('stream', {
 });
 
 // ---- boot --------------------------------------------------------------
+// Optional: expose the panel as an MCP Apps ui:// resource for GUI hosts (experimental,
+// off by default; Claude Code CLI cannot render iframes so it uses the self-hosted page).
+maybeRegisterMcpApps(server, { framePageFactory: () => import('./frame.js').then(m => m.framePage()) });
+
 const transport = new StdioServerTransport();
 await server.connect(transport);
 log('MCP server ready on stdio.');

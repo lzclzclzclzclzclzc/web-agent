@@ -3,11 +3,11 @@
 //   server -> browser : Server-Sent Events on GET /events
 //   browser -> server : POST /submit  (answers)  |  POST /ingest (external stream data)
 //
-// Interaction model: there is ONE persistent Submit button pinned bottom-right.
-// The agent renders whatever it wants (options, text fields, freehand HTML). The user
-// interacts freely, and only when they click the fixed Submit button do we gather the
-// whole interaction state and send it back — resuming the agent. The button is enabled
-// only while the agent is actually waiting on an ask().
+// Interaction model: one persistent Submit button pinned bottom-right. The agent renders
+// options / form controls / action buttons / freehand HTML; the user interacts freely and
+// clicks Submit to send the whole interaction state back — resuming the agent. Declared
+// "actions" are buttons that submit immediately (e.g. Approve/Reject). The submit button is
+// enabled only while the agent is actually waiting on an ask().
 
 export function framePage() {
   return `<!DOCTYPE html>
@@ -46,11 +46,23 @@ export function framePage() {
   .option.selected .letter { background:var(--accent); color:#fff; }
   .option h3 { margin:2px 0 3px; font-size:15px; }
   .option p { margin:0; color:var(--muted); font-size:13px; }
+  .controls { display:grid; gap:14px; margin:8px 0 4px; }
+  .control label { display:block; font-size:13px; color:var(--muted); margin-bottom:6px; }
+  .control .row { display:flex; align-items:center; gap:12px; }
+  .control input[type=range] { flex:1; accent-color:var(--accent); }
+  .control .cval { min-width:52px; text-align:right; font-variant-numeric:tabular-nums;
+    font-weight:600; color:var(--fg); }
   .freetext { margin:18px 0 8px; }
-  textarea, input[type=text] { width:100%; padding:12px 14px; background:var(--panel);
-    color:var(--fg); border:1.5px solid var(--line); border-radius:var(--radius); font:inherit; }
+  textarea, input[type=text], input[type=number], select { width:100%; padding:12px 14px;
+    background:var(--panel); color:var(--fg); border:1.5px solid var(--line);
+    border-radius:var(--radius); font:inherit; }
   textarea { min-height:90px; resize:vertical; }
-  textarea:focus, input[type=text]:focus { outline:none; border-color:var(--accent); }
+  textarea:focus, input:focus, select:focus { outline:none; border-color:var(--accent); }
+  .actions { display:flex; flex-wrap:wrap; gap:10px; margin:16px 0 4px; }
+  .actions button { background:var(--panel2); color:var(--fg); border:1.5px solid var(--line);
+    padding:10px 18px; font-size:14px; font-weight:600; border-radius:10px; cursor:pointer; }
+  .actions button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .actions button:hover { border-color:var(--accent); }
   .card { background:var(--panel); border:1px solid var(--line);
     border-radius:var(--radius); padding:18px; }
   .charts { display:grid; gap:16px; grid-template-columns:1fr; }
@@ -71,8 +83,7 @@ export function framePage() {
     font-size:15px; font-weight:700; border-radius:12px; cursor:pointer;
     box-shadow:0 6px 20px rgba(79,140,255,.35); transition:transform .1s, opacity .15s; }
   #submit:hover:not(:disabled) { transform:translateY(-1px); }
-  #submit:disabled { background:var(--panel2); color:var(--muted); cursor:not-allowed;
-    box-shadow:none; }
+  #submit:disabled { background:var(--panel2); color:var(--muted); cursor:not-allowed; box-shadow:none; }
   #submit.waiting { animation:pulse 1.8s ease-in-out infinite; }
   @keyframes pulse { 0%,100%{ box-shadow:0 6px 20px rgba(79,140,255,.35);} 50%{ box-shadow:0 6px 28px rgba(79,140,255,.7);} }
   #toast { position:fixed; left:50%; bottom:90px; transform:translateX(-50%);
@@ -110,7 +121,6 @@ let selected = new Set();        // selected option ids (for ask)
 const charts = new Map();        // channel -> {points:[], val, path}
 
 function esc(s){ return String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-
 function toast(msg){ toastEl.textContent=msg; toastEl.classList.add('show');
   clearTimeout(toast._t); toast._t=setTimeout(()=>toastEl.classList.remove('show'),2200); }
 
@@ -143,12 +153,67 @@ function renderAsk(s){
     el.onclick = () => toggle(el, s.multiSelect);
     app.appendChild(el);
   });
+
+  if (s.controls && s.controls.length) renderControls(s.controls);
+
   if (s.freeText && s.freeText.enabled){
     const wrap=document.createElement('div'); wrap.className='freetext';
     const ta=document.createElement('textarea'); ta.id='freetext-input';
     ta.placeholder = s.freeText.placeholder || 'Type your answer…';
     wrap.appendChild(ta); app.appendChild(wrap);
   }
+
+  if (s.actions && s.actions.length) renderActions(s.actions);
+}
+
+// The 'on' primitive: declarative controls whose values are collected into fields.
+function renderControls(controls){
+  const box=document.createElement('div'); box.className='controls';
+  controls.forEach(c => {
+    const wrap=document.createElement('div'); wrap.className='control';
+    const id = c.id;
+    const label=document.createElement('label'); label.textContent=c.label||id; label.setAttribute('for',id);
+    wrap.appendChild(label);
+    if (c.type==='slider' || c.type==='range'){
+      const row=document.createElement('div'); row.className='row';
+      const inp=document.createElement('input'); inp.type='range'; inp.id=id;
+      inp.min=c.min??0; inp.max=c.max??100; inp.step=c.step??1; inp.value=c.value??inp.min;
+      const val=document.createElement('span'); val.className='cval'; val.textContent=inp.value;
+      inp.oninput=()=>{ val.textContent=inp.value; };
+      row.appendChild(inp); row.appendChild(val); wrap.appendChild(row);
+    } else if (c.type==='checkbox'){
+      const inp=document.createElement('input'); inp.type='checkbox'; inp.id=id; inp.checked=!!c.value;
+      wrap.querySelector('label').prepend(inp); wrap.querySelector('label').style.display='flex';
+      wrap.querySelector('label').style.gap='8px';
+    } else if (c.type==='select'){
+      const sel=document.createElement('select'); sel.id=id;
+      (c.options||[]).forEach(o=>{ const op=document.createElement('option');
+        op.value = typeof o==='string'?o:o.value; op.textContent = typeof o==='string'?o:(o.label||o.value);
+        if ((c.value)===op.value) op.selected=true; sel.appendChild(op); });
+      wrap.appendChild(sel);
+    } else if (c.type==='number'){
+      const inp=document.createElement('input'); inp.type='number'; inp.id=id;
+      if(c.min!=null)inp.min=c.min; if(c.max!=null)inp.max=c.max; if(c.step!=null)inp.step=c.step;
+      inp.value=c.value??''; wrap.appendChild(inp);
+    } else { // text
+      const inp=document.createElement('input'); inp.type='text'; inp.id=id;
+      inp.value=c.value??''; if(c.placeholder)inp.placeholder=c.placeholder; wrap.appendChild(inp);
+    }
+    box.appendChild(wrap);
+  });
+  app.appendChild(box);
+}
+
+// Action buttons submit immediately with {action:id} (e.g. Approve / Reject).
+function renderActions(actions){
+  const box=document.createElement('div'); box.className='actions';
+  actions.forEach(a => {
+    const b=document.createElement('button'); b.textContent=a.label||a.id;
+    if (a.primary) b.className='primary';
+    b.onclick=()=>doSubmit(a.id);
+    box.appendChild(b);
+  });
+  app.appendChild(box);
 }
 
 function toggle(el, multi){
@@ -162,50 +227,46 @@ function toggle(el, multi){
 function setAsk(s){
   if (s){
     activeAskId = s.askId;
-    submitBtn.disabled = false;
-    submitBtn.classList.add('waiting');
+    submitBtn.disabled = false; submitBtn.classList.add('waiting');
     submitBtn.textContent = s.submitLabel || 'Submit';
     submitHint.textContent = 'Interact above, then click Submit to send it back to the agent.';
   } else {
     activeAskId = null;
-    submitBtn.disabled = true;
-    submitBtn.classList.remove('waiting');
+    submitBtn.disabled = true; submitBtn.classList.remove('waiting');
     submitBtn.textContent = 'Submit';
     submitHint.textContent = "The agent isn't waiting for input yet.";
   }
 }
 
-// Gather the full interaction state from whatever is on the page.
-function collectValue(){
-  const value = { selected:[...selected], selectedLabels:[], text:'', fields:{} };
+function collectValue(action){
+  const value = { action: action ?? null, selected:[...selected], selectedLabels:[], text:'', fields:{} };
   value.selectedLabels = (current?.options||[])
-    .filter(o => selected.has(String(o.id)) || selected.has(o.id))
-    .map(o => o.label);
-  // any inputs the agent placed (declarative freetext OR freehand HTML controls)
+    .filter(o => selected.has(String(o.id)) || selected.has(o.id)).map(o => o.label);
   app.querySelectorAll('input, textarea, select').forEach(el => {
-    const key = el.name || el.id;
+    const key = el.name || el.id; if (!key) return;
     let v;
     if (el.type === 'checkbox') v = el.checked;
     else if (el.type === 'radio'){ if (!el.checked) return; v = el.value; }
+    else if (el.type === 'range' || el.type === 'number') v = el.value === '' ? null : Number(el.value);
     else v = el.value;
-    if (key) value.fields[key] = v;
+    value.fields[key] = v;
   });
   const ft = document.getElementById('freetext-input');
   if (ft) value.text = ft.value.trim();
   return value;
 }
 
-async function doSubmit(){
+async function doSubmit(action){
   if (!activeAskId){ toast("The agent isn't waiting for input right now."); return; }
   submitBtn.disabled = true; submitBtn.classList.remove('waiting');
   const askId = activeAskId;
   try {
     const r = await fetch('/submit', { method:'POST', headers:{'content-type':'application/json'},
-      body: JSON.stringify({ askId, value: collectValue() }) });
+      body: JSON.stringify({ askId, value: collectValue(action) }) });
     if (!r.ok){ toast('Could not submit (already answered?).'); setAsk(current?.kind==='ask'?current:null); }
   } catch(e){ toast('Network error while submitting.'); setAsk(current?.kind==='ask'?current:null); }
 }
-submitBtn.addEventListener('click', doSubmit);
+submitBtn.addEventListener('click', () => doSubmit(null));
 
 // ---- live charts -------------------------------------------------------
 function mountCharts(defs){
