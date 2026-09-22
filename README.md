@@ -38,13 +38,15 @@ Registered at **user scope** (available in all projects):
 claude mcp add web-agent --scope user -- node C:/Users/I779318/Desktop/CSS/web-agent/src/mcp.js
 ```
 
-The `ui-author` subagent and the `web-agent` skill are installed under `~/.claude/`.
-**Restart Claude Code** (or start a new session) to pick up the MCP tools; then the agent
-can call `open_panel`, `render`, `ask`, `stream`.
+The `web-ui` subagent and the `web-agent` skill are installed under `~/.claude/`.
+**Restart Claude Code** (or start a new session) to pick up the MCP tools. The main agent
+does not drive the panel directly — it delegates each interaction to the `web-ui` subagent,
+which builds the UI, waits for the user, and returns the answer.
 
-Recommended: allowlist these tools so a blocking `ask` never stalls on a permission
-prompt, and raise the client tool-call timeout for long human think-time (the server sends
-progress keep-alives, but clients enforce a hard maximum).
+Recommended: allowlist the web-agent tools so the subagent's blocking `ask` never stalls on
+a permission prompt (add `mcp__web-agent__open_panel|render|ask|stream` to `permissions.allow`
+in `~/.claude/settings.json`), and raise the client tool-call timeout for long human
+think-time (the server sends progress keep-alives, but clients enforce a hard maximum).
 
 Equivalent manual config (`~/.claude.json` / project `.mcp.json`):
 
@@ -53,7 +55,11 @@ Equivalent manual config (`~/.claude.json` / project `.mcp.json`):
     "args": ["C:/Users/I779318/Desktop/CSS/web-agent/src/mcp.js"] } } }
 ```
 
-## Building screens — three tiers, cheapest first
+## Building screens — the `web-ui` subagent's three tiers
+
+The main agent delegates each interaction to the **`web-ui`** subagent with a brief (goal +
+what to show + answer shape). The subagent picks the cheapest tier that fits and returns only
+the structured answer:
 
 1. **Declarative (default):** `ask` with `options` (A/B/C), `controls`
    (slider/number/checkbox/text/select → collected into `answer.fields`), `actions`
@@ -61,9 +67,9 @@ Equivalent manual config (`~/.claude.json` / project `.mcp.json`):
    The **`on` primitive** (interactive controls + action buttons) lives here — e.g. drag a
    slider to tune a threshold, or click Approve/Reject.
 2. **Freehand fragment (static):** for bespoke mockups / diagrams / comparisons the user
-   must *see* and pick, delegate authoring to the **`ui-author` subagent** (writes a file,
-   returns the path), then `render({ htmlPath })` + an `ask`. Scripts don't run; the panel
-   collects form fields.
+   must *see* and pick, the subagent authors the HTML (to a file for anything sizable) and
+   uses `render({ html | htmlPath })` + an `ask`. Scripts don't run; the panel collects form
+   fields.
 3. **Custom interactive UI (maximum freedom):** ship a full document via `ask({ doc })`
    (or `docPath`). It runs in a **sandboxed iframe** with its own HTML/CSS/JS — you design
    the interaction (drag, canvas, node graph, ranking, live-preview sliders…) **and the
@@ -121,7 +127,7 @@ src/frame.js     the served page (inline CSS + client JS; options/controls/actio
 src/mcp.js       MCP stdio server exposing the tools (official SDK)
 src/mcp-apps.js  optional/experimental MCP Apps ui:// resource (flag-gated)
 demo/demo.js     standalone walkthrough (no MCP needed)
-agents/ui-author.md         subagent that authors freehand HTML fragments -> file path
+agents/web-ui.md            subagent that owns a whole interaction (build UI -> ask -> return answer)
 skills/web-agent/SKILL.md   playbook for when/how the agent uses the tools
 docs/…/specs/               design document
 ```
