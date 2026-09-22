@@ -29,25 +29,25 @@ the panel when the content is **visual** (layouts, mockups, diagrams, comparison
 **spatial** (graphs, flows), **manipulable** (sliders/forms/drag), or **live** (values
 changing over time). These are categories, not an allowlist — invent new uses freely.
 
-## Terminal-free mode (run the whole conversation in the panel)
+## Terminal-free mode (run everything in the panel — but you choose the form)
 
-When the user wants **0 terminal interaction** (everything in the browser — the `/web`
-command bootstraps this), the MAIN agent holds the conversation in the panel itself:
+When the user wants **0 terminal interaction** (the `/web` command bootstraps this), do
+everything in the panel. **You decide the interaction form at each step — conversation is
+only one option, not the spine.** Mix freely:
 
-- `say(text)` — speak to the user in the panel transcript (markdown-lite). Put ALL
-  user-facing output here; never rely on terminal text the user must read.
-- `converse(message?)` — post a message and **block until the user sends a chat reply** in
-  the panel; returns `{ text }`.
+- `say(text)` / `render(...)` — show or tell (message, content, diagram, live chart panel).
+- `converse(message?)` — a free-form chat reply (blocks for the user's typed message).
+- `ask(...)` — structured input: options, controls (sliders/numbers/selects), action
+  buttons, free text, or a fully custom interactive `doc` you design (blocks for submit).
 
-The pattern is a loop: `say`/`converse` → do work → `say` results → `converse` again. Because
-`converse`/`ask` block, the agent stays parked in the browser and the user never touches the
-terminal. For richer input than chat (choices, sliders, a diagram to confirm, a custom
-interaction), delegate that step to the `web-ui` subagent (it renders into the same panel and
-returns the answer), then continue the loop.
+Do NOT default to chat. Pick the form that makes the user's next action easiest — a picker,
+a slider, a canvas, a confirm button, or a message box. The ONLY rule for staying
+terminal-free is: **end each step parked in a blocking call (`ask` or `converse`)** — which
+one, and what UI it carries, is your choice — so the agent resumes in the browser when the
+user acts and never falls back to the terminal. Delegate sizable custom UI to the `web-ui`
+subagent.
 
-Caveat: the only unavoidable terminal action is the one command that starts the session; keep
-the loop alive (always end a step with `converse`/`ask`) so the agent never falls back to the
-terminal.
+Caveat: the only unavoidable terminal action is the one command that starts the session.
 
 ## How to use it — dispatch the `web-ui` subagent
 

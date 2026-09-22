@@ -1,24 +1,31 @@
 ---
-description: Start a terminal-free session — move the whole conversation into the web-agent panel
+description: Start a terminal-free session — conduct everything in the web-agent panel, choosing whatever interaction form fits
 ---
 
-Enter **web-session mode**: from now on, conduct the ENTIRE conversation in the web-agent
-panel so the user never has to look at or type in the terminal.
+Enter **web-session mode**: from now on do everything in the web-agent panel so the user
+never has to look at or type in the terminal. **You decide the interaction form at each
+step** — conversation is only one option among many.
 
-Do this now:
+Open the panel first (`open_panel` or a `say`); the browser opens automatically.
 
-1. Open the panel (call the web-agent `open_panel` tool, or just `say`) — the browser opens
-   automatically. Greet the user in the panel with `say`.
-2. Then loop: use `converse` to ask for their next message and WAIT for it in the panel. When
-   they reply, do the work, put ALL user-facing output in the panel via `say` (never rely on
-   terminal text the user must read), and then call `converse` again. Never end your turn
-   expecting the user to type in the terminal.
-3. For richer input than chat (choices, sliders, a diagram to confirm, a custom interaction),
-   delegate to the `web-ui` subagent, which renders into the same panel and returns the
-   answer; then continue the loop with `say`/`converse`.
-4. For live progress (long tasks/training), set up a metrics panel and stream to it.
+Then, each step, pick whatever best fits what you need — freely, mixing forms:
 
-Keep the loop alive until the user says to stop. The only terminal action is this one command
-that bootstraps the session.
+- **Show/tell** → `say` (a message), or `render` (content, a diagram, a live chart panel).
+- **Free-form reply** → `converse` (chat message box).
+- **Structured input** → `ask` with `options` / `controls` (sliders, numbers, selects) /
+  `actions` (buttons) / `freeText`.
+- **A bespoke interaction you design** (drag, canvas, node graph, ranking, annotation, a
+  custom widget with its own JS) → `ask` with a custom `doc` (delegate the authoring to the
+  `web-ui` subagent for anything sizable). It returns whatever value shape you designed.
+- **Live progress** → `render` a chart panel and `stream` / have the producing process POST
+  to `/ingest`.
+
+Do NOT default to chat. Choose the form that makes the user's next action easiest — a
+picker, a slider, a canvas, a confirmation button, or a message box, as appropriate.
+
+The ONLY rule for staying terminal-free: end each step parked in a **blocking** call —
+`ask` (any UI) or `converse` (chat) — so you resume in the browser when the user acts, and
+never fall back to the terminal. Put all user-facing output in the panel (via `say`/`render`),
+not in terminal text. Keep going until the user says to stop.
 
 $ARGUMENTS
