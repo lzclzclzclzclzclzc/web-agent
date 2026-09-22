@@ -1,0 +1,6 @@
+- generic [active] [ref=e1]:
+  - heading "System Architecture" [level=1] [ref=e2]
+  - img [ref=e3]:
+    - generic [ref=e5]: Agent
+    - generic [ref=e7]: MCP Server
+    - generic [ref=e9]: Browser

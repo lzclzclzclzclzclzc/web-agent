@@ -78,6 +78,13 @@ For training/long-task metrics, brief `web-ui` to set up a live panel (charts); 
 subagent will tell you the URL), so curves update with no agent turn. Delegate another
 `web-ui` interaction only when a decision is needed.
 
+## Multi-page routes
+
+To publish content at a stable URL (a big diagram, a report, an image), the agent/`web-ui`
+can `route({ path:'/image', html|htmlPath|filePath })` and make the panel the hub with entry
+links (`render({ html:'<a href="/image" target="_blank">Architecture</a>' })`). Published
+pages are normal pages (their own scripts run); reserved paths: `/ /events /submit /ingest`.
+
 ## Operational notes
 
 - The `web-agent` tools are allowlisted so the subagent's blocking `ask` never stalls on a

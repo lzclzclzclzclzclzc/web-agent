@@ -32,6 +32,7 @@ export class InteractionServer {
     this.screen = null;                      // current screen object (replaced each step)
     this.pending = null;                     // { id, resolve } for an in-flight ask()/converse()
     this.streams = new Map();                // channel -> [values] (bounded history)
+    this.routes = new Map();                 // agent-published GET routes: path -> {contentType, body}
     this._page = framePage();
   }
 
@@ -74,6 +75,19 @@ export class InteractionServer {
     if (hist.length > MAX_HISTORY) hist.shift();
     this._broadcast('stream', { channel, value });
     return { ok: true };
+  }
+
+  // Publish a GET route at `path` serving `body` (string or Buffer) with `contentType`.
+  // Lets the agent build a small multi-page local site (e.g. /image for a diagram) that the
+  // panel links to as entry points. Reserved paths are rejected.
+  route(path, { contentType = 'text/html; charset=utf-8', body = '' } = {}) {
+    let p = String(path || '').trim();
+    if (!p.startsWith('/')) p = '/' + p;
+    if (['/', '/events', '/submit', '/ingest', '/favicon.ico'].includes(p)) {
+      throw new Error('reserved path: ' + p);
+    }
+    this.routes.set(p, { contentType, body });
+    return { path: p, url: this.url + p };
   }
 
   // Show a message in the panel (as the current screen). Non-blocking.
@@ -122,6 +136,11 @@ export class InteractionServer {
     if (req.method === 'GET' && url.pathname === '/events') return this._serveEvents(req, res);
     if (req.method === 'POST' && url.pathname === '/submit') return this._handleSubmit(req, res);
     if (req.method === 'POST' && url.pathname === '/ingest') return this._handleIngest(req, res);
+    if (req.method === 'GET' && this.routes.has(url.pathname)) {
+      const r = this.routes.get(url.pathname);
+      res.writeHead(200, { 'content-type': r.contentType, 'cache-control': 'no-store' });
+      return res.end(r.body);
+    }
     res.writeHead(404, { 'content-type': 'text/plain' }); res.end('not found');
   }
 

@@ -15,6 +15,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { extname } from 'node:path';
 import { InteractionServer } from './engine.js';
 import { maybeRegisterMcpApps } from './mcp-apps.js';
 
@@ -48,6 +49,24 @@ function openBrowser(url) {
 }
 
 const urlLine = () => `Open the panel in your browser: ${engine.url}`;
+
+const CONTENT_TYPES = {
+  '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8',
+  '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif', '.webp': 'image/webp', '.ico': 'image/x-icon',
+  '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.pdf': 'application/pdf',
+};
+
+// Wrap a body fragment in a themed full page; pass full documents through untouched.
+function themedPage(title, body) {
+  if (/^\s*<(!doctype|html)/i.test(body)) return body;
+  const css = ":root{--bg:#0f1117;--panel:#161a26;--panel2:#1d2333;--line:#2a3142;--fg:#e6e8ee;--muted:#9aa3b8;--accent:#4f8cff}"
+    + "*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:32px}"
+    + "a{color:var(--accent)}.wrap{max-width:1000px;margin:0 auto}h1{font-size:22px}";
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">`
+    + `<title>${title || 'web-agent'}</title><style>${css}</style></head><body><div class="wrap">${body}</div></body></html>`;
+}
 
 // ---- MCP server + tools ------------------------------------------------
 const server = new McpServer({ name: 'web-agent', version: '0.1.0' });
@@ -176,6 +195,41 @@ server.registerTool('stream', {
   await ensureEngine();
   engine.stream(args.channel, args.value);
   return { content: [{ type: 'text', text: `ok (${args.channel}=${args.value})` }] };
+});
+
+server.registerTool('route', {
+  title: 'Publish a page/asset at a URL path',
+  description: 'Serve content at a stable GET route (e.g. path "/image" for an architecture diagram, "/report" for a page). Build a small multi-page local site and link to these from the panel with render({html:"<a href=\'/image\' target=\'_blank\'>…</a>"}) as entry points. Source one of: `html` (a full page or fragment — fragments are themed), `htmlPath` (an html/text file), or `filePath` (any file incl. images/svg/pdf; content-type inferred). Published pages are normal pages (their own scripts run natively). Returns the full URL.',
+  inputSchema: {
+    path: z.string().describe('URL path, e.g. "/image" (reserved: /, /events, /submit, /ingest)'),
+    html: z.string().optional().describe('inline HTML (full document or fragment; fragments get themed)'),
+    htmlPath: z.string().optional().describe('path to an .html/.txt file'),
+    filePath: z.string().optional().describe('path to any file to serve (png/jpg/svg/pdf/…); content-type inferred'),
+    contentType: z.string().optional().describe('override the content-type'),
+    title: z.string().optional().describe('page title when wrapping an HTML fragment'),
+  },
+}, async (args) => {
+  await ensureEngine();
+  openBrowser(engine.url);
+  let contentType = args.contentType, body;
+  try {
+    if (args.filePath) {
+      body = readFileSync(args.filePath);
+      contentType = contentType || CONTENT_TYPES[extname(args.filePath).toLowerCase()] || 'application/octet-stream';
+    } else if (args.htmlPath) {
+      body = themedPage(args.title, readFileSync(args.htmlPath, 'utf8'));
+      contentType = contentType || 'text/html; charset=utf-8';
+    } else if (args.html != null) {
+      body = themedPage(args.title, args.html);
+      contentType = contentType || 'text/html; charset=utf-8';
+    } else {
+      return { isError: true, content: [{ type: 'text', text: 'Provide one of html / htmlPath / filePath.' }] };
+    }
+  } catch (e) { return { isError: true, content: [{ type: 'text', text: `Could not read source: ${e.message}` }] }; }
+  let r;
+  try { r = engine.route(args.path, { contentType, body }); }
+  catch (e) { return { isError: true, content: [{ type: 'text', text: e.message }] }; }
+  return { content: [{ type: 'text', text: `Published ${r.path} -> ${r.url}` }] };
 });
 
 server.registerTool('say', {

@@ -12,6 +12,7 @@ stream live data — for when a text-only reply isn't enough.
 | `render` | push a screen: declarative content, live-metrics panel, trusted freehand HTML (`html`/`htmlPath`), or a full custom interactive document (`doc`/`docPath`) | no |
 | `ask` | push a screen (options / controls / actions / free-text, or a custom document) and **wait until the user submits**, then return their answer | **yes** |
 | `stream` | append a live datapoint to a chart channel | no |
+| `route` | publish a page/asset at a URL path (e.g. `/image` for a diagram); link to it from the panel | no |
 
 **The core trick:** an MCP tool call suspends the model mid-turn until it returns, so `ask`
 **resumes the agent the instant the user clicks Submit in the browser** — no "type
@@ -106,6 +107,19 @@ The answer shape returned by `ask`:
 `render({ charts:[{channel:'loss'},{channel:'f1'}] })`, then have the **producing process**
 POST `{channel,value}` to `<url>/ingest` (or call `stream`). Curves update over SSE with no
 agent turn per tick.
+
+## Multi-page routes
+
+The agent can publish content at stable URL paths with `route`, building a small local site:
+
+- `route({ path:'/image', html: '<svg>…</svg>' })` → serves an architecture diagram at
+  `<url>/image` (fragments are themed; full documents pass through and their scripts run).
+- `route({ path:'/report', htmlPath:'…' })` or `route({ path:'/logo.png', filePath:'…' })`
+  → serve files/images (content-type inferred).
+- The panel (`/`) is the hub: `render({ html:'<a href="/image" target="_blank">Architecture</a>' })`
+  gives the user entry points to the published pages.
+
+Reserved paths: `/`, `/events`, `/submit`, `/ingest`.
 
 ## Agent-web contract (enforced regardless of who authors the markup)
 

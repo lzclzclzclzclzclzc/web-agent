@@ -230,6 +230,7 @@ Claude Code 子 agent 有独立 context（其 token 不进父 agent 历史），
 - **UI-author 路径**：`render({htmlPath})` handle 化 + `agents/ui-author.md` 子 agent 定义 + `skills/web-agent/SKILL.md` 播报手册。
 - **可插拔渲染面 + MCP Apps 适配**（`src/mcp-apps.js`）：`WEB_AGENT_MCP_APPS=1` 时注册 `ui://web-agent/panel` 资源;默认关闭、非破坏（已验证开关两态）。
 - **接入**：`claude mcp add web-agent --scope user`，`✓ Connected`;子 agent 与 skill 安装到 `~/.claude/`。
+- **路由发布**：`route(path, html|htmlPath|filePath)` —— agent 在任意 URL 路径发布页面/图片/文件(content-type 按扩展名推断;片段自动套主题、完整文档原样且脚本原生执行),面板用 `render` 放入口链接当 hub。保留路径 `/ /events /submit /ingest`。浏览器端验证:`/image` 发布架构图 + 面板入口链接跳转。
 - **0 终端会话模式**：`say`(往面板说话)+ `converse`(在面板等用户回话,阻塞)+ 面板的对话记录区 + 常驻输入框(composer);`/web` 命令引导。主 agent 靠 say/converse 循环把整段会话留在网页,永远卡在 `converse`/`ask` 里,用户全程不碰终端。浏览器端验证:两轮聊天回合(打字→发送→agent 回应→再等)全在网页完成。
 
 架构性未尽（诚实标注）：MCP Apps 的宿主侧 iframe↔工具 JSON-RPC 桥是宿主相关、且终端 Claude Code CLI 无法渲染 iframe，故该路径为脚手架、未在 CLI 目标运行时验证。`on` 的"render 期间即时唤醒 agent"受回合模型限制不做（需 agent 卡在 ask 内）。**0 终端**的唯一不可避免的终端动作是开场那一次启动/命令;若 agent 回合意外结束需回终端重启。（诚实标注）：MCP Apps 的宿主侧 iframe↔工具 JSON-RPC 桥是宿主相关、且终端 Claude Code CLI 无法渲染 iframe，故该路径为脚手架、未在 CLI 目标运行时验证。`on` 的"render 期间即时唤醒 agent"受回合模型限制不做（需 agent 卡在 ask 内）。

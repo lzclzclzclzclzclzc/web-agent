@@ -1,0 +1,14 @@
+- generic [active] [ref=f1e1]:
+  - banner [ref=f1e2]:
+    - generic [ref=f1e4]: web-agent
+    - generic [ref=f1e5]: connected
+  - main [ref=f1e6]:
+    - heading "Project hub" [level=2] [ref=f1e7]
+    - paragraph [ref=f1e8]: Entry points published by the agent
+    - generic [ref=f1e9]:
+      - paragraph [ref=f1e10]: "Published pages:"
+      - link "Open architecture diagram (/image)" [ref=f1e11] [cursor=pointer]:
+        - /url: /image
+  - generic [ref=f1e12]:
+    - generic [ref=f1e13]: The agent isn't waiting for input yet.
+    - button "Submit" [disabled] [ref=f1e14]
