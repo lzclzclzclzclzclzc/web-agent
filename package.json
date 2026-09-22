@@ -1,13 +1,23 @@
 {
   "name": "web-agent",
   "version": "0.1.0",
-  "private": true,
+  "description": "A universal agent<->human rich-interaction layer for Claude Code: an MCP server that spins up a local web panel for say/converse/render/ask/stream/route.",
   "type": "module",
-  "description": "Universal agent<->human rich-interaction layer for Claude Code: an MCP server that spins up a local web page for render/ask/stream.",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "mcp",
+    "model-context-protocol",
+    "agent",
+    "human-in-the-loop",
+    "ui"
+  ],
   "bin": {
     "web-agent-mcp": "src/mcp.js"
   },
   "scripts": {
+    "setup": "node scripts/install.mjs",
+    "uninstall": "node scripts/install.mjs --uninstall",
     "mcp": "node src/mcp.js",
     "demo": "node demo/demo.js"
   },
@@ -16,5 +26,9 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/USER/web-agent"
   }
 }
