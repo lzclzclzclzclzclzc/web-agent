@@ -52,16 +52,39 @@ type, use freehand controls) and clicks Submit to send the whole interaction sta
 Declared `actions` are buttons that submit immediately (e.g. Approve / Reject). The Submit
 button is enabled only while the agent is actually waiting on an `ask`.
 
-## Building a screen — declarative first
+## Building a screen — three tiers, cheapest first
 
 1. **Declarative (default, cheap, safe):** `ask` with `options` (choices), `controls`
    (slider / number / checkbox / text / select — collected into `answer.fields`), `actions`
    (immediate-submit buttons → `answer.action`), and/or `freeText`. No HTML authoring. Use
    this for the large majority of interactions.
-2. **Freehand HTML (escape hatch):** only when the user must *see* a bespoke artifact.
-   **Delegate the authoring to the `ui-author` subagent**, which writes a contract-compliant
-   HTML file and returns its path; then `render({ htmlPath })`. This keeps verbose markup
-   out of your context. Don't hand-write large HTML inline yourself.
+2. **Freehand fragment (static visuals):** for a bespoke thing the user must *see* but only
+   needs to pick/confirm — mockups, diagrams, comparisons. **Delegate authoring to the
+   `ui-author` subagent** (returns a file path), then `render({ htmlPath })` and pair with an
+   `ask({ options|actions })`. Scripts do NOT run in a fragment; it's static + collected form
+   fields.
+3. **Custom interactive UI (maximum freedom):** when you want to *design your own
+   interaction* — drag-and-drop, a canvas, a node graph, ranking, a drawing surface, linked
+   sliders with a live preview, anything. Ship a full document via `ask({ doc })` (or
+   `docPath` from the `ui-author` subagent). It runs in a **sandboxed iframe** with its own
+   HTML/CSS/JS, and you define **both the interaction and the shape of the returned value**.
+
+Rule of thumb: choice/value/form → tier 1. See-and-pick a custom visual → tier 2. Invent a
+new interaction and return your own data structure → tier 3.
+
+### The `webagent` bridge (tier 3)
+
+Inside a custom document the panel injects `window.webagent` — the only channel out
+(everything else is blocked by a sandbox + CSP: no external network, no parent access):
+
+- `webagent.submit(value)` — resolve the `ask` with ANY JSON `value` your UI builds (from
+  your own button or completion condition).
+- `webagent.onCollect(fn)` — register a getter so the persistent Submit button returns your
+  value. Provide this so the global Submit works even without a button of your own.
+- `webagent.onStream((channel, value) => …)` — receive live datapoints for custom viz.
+
+So `answer` can be *any shape you designed* (e.g. `{confidence, tags, boxes}`), not just the
+declarative `{selected, text, fields}`.
 
 ## Design quality for freehand screens
 

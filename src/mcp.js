@@ -69,23 +69,24 @@ const chartsSchema = z.array(z.object({
 
 server.registerTool('render', {
   title: 'Render a screen',
-  description: 'Push a screen to the panel and return immediately (does NOT wait). Use for showing content, mockups, or setting up a live-metrics panel (declare charts here, then push data with stream). `html` is trusted markup you author under the agent-web contract (localhost-only, no secrets, no external calls). For large/bespoke UI, prefer delegating authoring to the `ui-author` subagent and passing `htmlPath` (the file it wrote) so the verbose markup never enters your context.',
+  description: 'Push a screen to the panel and return immediately (does NOT wait). Content can be: declarative (title/subtitle + charts), trusted freehand HTML (`html` inline or `htmlPath`), or a full CUSTOM interactive document (`doc` inline or `docPath`) that runs in a sandboxed iframe with its own JS. For large/bespoke UI, delegate authoring to the `ui-author` subagent and pass htmlPath/docPath so the markup never enters your context.',
   inputSchema: {
     title: z.string().optional(),
     subtitle: z.string().optional(),
-    html: z.string().optional().describe('freehand HTML body (for bespoke mockups/diagrams)'),
-    htmlPath: z.string().optional().describe('path to an HTML file to render (handle-based; e.g. written by the ui-author subagent)'),
+    html: z.string().optional().describe('freehand HTML body (static; injected, scripts do NOT run)'),
+    htmlPath: z.string().optional().describe('path to an HTML fragment file to render'),
+    doc: z.string().optional().describe('full custom interactive document body (runs in a sandboxed iframe; use the injected `webagent` bridge, see docs). For live custom viz, call webagent.onStream(cb).'),
+    docPath: z.string().optional().describe('path to a custom document file to render in the sandboxed iframe'),
     charts: chartsSchema,
   },
 }, async (args) => {
   await ensureEngine();
   openBrowser(engine.url);
   const view = { ...args };
-  if (args.htmlPath) {
-    try { view.html = readFileSync(args.htmlPath, 'utf8'); }
-    catch (e) { return { isError: true, content: [{ type: 'text', text: `Could not read htmlPath: ${e.message}` }] }; }
-    delete view.htmlPath;
-  }
+  try {
+    if (args.htmlPath) { view.html = readFileSync(args.htmlPath, 'utf8'); delete view.htmlPath; }
+    if (args.docPath) { view.doc = readFileSync(args.docPath, 'utf8'); delete view.docPath; }
+  } catch (e) { return { isError: true, content: [{ type: 'text', text: `Could not read path: ${e.message}` }] }; }
   engine.render(view);
   return { content: [{ type: 'text', text: `Rendered "${args.title || '(untitled)'}". ${urlLine()}` }] };
 });
@@ -122,6 +123,8 @@ server.registerTool('ask', {
       enabled: z.boolean(),
       placeholder: z.string().optional(),
     }).optional(),
+    doc: z.string().optional().describe('full CUSTOM interactive document body; runs in a sandboxed iframe with its own JS. Design any interaction you like and call webagent.submit(value) with ANY JSON to answer (and/or webagent.onCollect(fn) so the global Submit button collects your value). This is the maximum-freedom path.'),
+    docPath: z.string().optional().describe('path to a custom document file (e.g. written by the ui-author subagent)'),
     submitLabel: z.string().optional(),
   },
 }, async (args, extra) => {
@@ -130,6 +133,10 @@ server.registerTool('ask', {
 
   // Normalize option ids to strings so the browser and answer agree.
   const spec = { ...args, options: (args.options || []).map((o, i) => ({ ...o, id: String(o.id ?? i) })) };
+  if (args.docPath) {
+    try { spec.doc = readFileSync(args.docPath, 'utf8'); delete spec.docPath; }
+    catch (e) { return { isError: true, content: [{ type: 'text', text: `Could not read docPath: ${e.message}` }] }; }
+  }
   const pending = engine.ask(spec);
 
   // Clean cancellation if the client aborts the tool call (e.g. timeout / user interrupt).

@@ -226,6 +226,7 @@ Claude Code 子 agent 有独立 context（其 token 不进父 agent 历史），
 - **本地 web 引擎**（`src/engine.js`，零依赖 HTTP+SSE）：`ask` 长挂→提交解析、`stream` 广播、外部 `/ingest`、favicon 204，均 headless 验证。
 - **固定右下角 Submit 按钮 + 通用收集器**（`src/frame.js`）：按用户要求，交互完点固定按钮才回传;无 ask 时自动禁用。浏览器端已验证。
 - **`on` 原语**：声明式 `controls`（slider/number/checkbox/text/select，收进 `answer.fields`）+ 立即提交的 `actions`（`answer.action`）。浏览器端验证：拨滑块→点 Approve 立即带值提交。
+- **自定义 UI 模式（最大自由度）**：`render/ask` 接受 `doc`/`docPath` —— agent 交付完整交互文档,跑在 **sandbox iframe**(allow-scripts,无 same-origin)+ CSP(禁外网/远程资源)里,经注入的 `webagent` 桥(`submit`/`onCollect`/`onStream`,postMessage)回传**任意自定义 JSON**。agent 自定义交互与返回结构。浏览器端验证:自绘滑块+标签+备注→全局 Submit 走 `onCollect`→返回 `{confidence,tags,note}`。
 - **UI-author 路径**：`render({htmlPath})` handle 化 + `agents/ui-author.md` 子 agent 定义 + `skills/web-agent/SKILL.md` 播报手册。
 - **可插拔渲染面 + MCP Apps 适配**（`src/mcp-apps.js`）：`WEB_AGENT_MCP_APPS=1` 时注册 `ui://web-agent/panel` 资源;默认关闭、非破坏（已验证开关两态）。
 - **接入**：`claude mcp add web-agent --scope user`，`✓ Connected`;子 agent 与 skill 安装到 `~/.claude/`。

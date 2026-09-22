@@ -7,8 +7,8 @@ stream live data — for when a text-only reply isn't enough.
 | Tool | What it does | Blocks? |
 |------|--------------|---------|
 | `open_panel` | start the page, return its URL | no |
-| `render` | push a screen: declarative content, live-metrics panel, or trusted freehand HTML (inline or via `htmlPath`) | no |
-| `ask` | push a screen (options / controls / actions / free-text) and **wait until the user clicks Submit**, then return their answer | **yes** |
+| `render` | push a screen: declarative content, live-metrics panel, trusted freehand HTML (`html`/`htmlPath`), or a full custom interactive document (`doc`/`docPath`) | no |
+| `ask` | push a screen (options / controls / actions / free-text, or a custom document) and **wait until the user submits**, then return their answer | **yes** |
 | `stream` | append a live datapoint to a chart channel | no |
 
 **The core trick:** an MCP tool call suspends the model mid-turn until it returns, so `ask`
@@ -53,17 +53,29 @@ Equivalent manual config (`~/.claude.json` / project `.mcp.json`):
     "args": ["C:/Users/I779318/Desktop/CSS/web-agent/src/mcp.js"] } } }
 ```
 
-## Building screens — declarative first
+## Building screens — three tiers, cheapest first
 
 1. **Declarative (default):** `ask` with `options` (A/B/C), `controls`
    (slider/number/checkbox/text/select → collected into `answer.fields`), `actions`
    (immediate-submit buttons → `answer.action`), and/or `freeText`. No HTML to author.
    The **`on` primitive** (interactive controls + action buttons) lives here — e.g. drag a
    slider to tune a threshold, or click Approve/Reject.
-2. **Freehand HTML (escape hatch):** for bespoke mockups / diagrams / generative UI,
-   delegate authoring to the **`ui-author` subagent** (it writes a contract-compliant HTML
-   file and returns the path), then `render({ htmlPath })`. Keeps verbose markup out of the
-   main agent's context.
+2. **Freehand fragment (static):** for bespoke mockups / diagrams / comparisons the user
+   must *see* and pick, delegate authoring to the **`ui-author` subagent** (writes a file,
+   returns the path), then `render({ htmlPath })` + an `ask`. Scripts don't run; the panel
+   collects form fields.
+3. **Custom interactive UI (maximum freedom):** ship a full document via `ask({ doc })`
+   (or `docPath`). It runs in a **sandboxed iframe** with its own HTML/CSS/JS — you design
+   the interaction (drag, canvas, node graph, ranking, live-preview sliders…) **and the
+   shape of the returned value**. The document talks to the agent only through the injected
+   `webagent` bridge:
+
+   - `webagent.submit(value)` — resolve the `ask` with ANY JSON you build.
+   - `webagent.onCollect(fn)` — let the persistent Submit button collect your value.
+   - `webagent.onStream((channel,value)=>…)` — receive live data for custom viz.
+
+   A sandbox + CSP (no external network, no parent access) is the security boundary; the
+   bridge is the only way data leaves the iframe.
 
 The answer shape returned by `ask`:
 
