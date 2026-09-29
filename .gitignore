@@ -4,3 +4,7 @@ node_modules/
 .playwright-mcp/
 scratch_*.mjs
 docs/
+.web-agent-data/
+dist/
+test-results/
+__pycache__/
