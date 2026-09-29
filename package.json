@@ -16,6 +16,9 @@
     "web-agent-mcp": "src/mcp.js"
   },
   "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "tsc --noEmit && vite build",
+    "start": "node src/main.js",
     "setup": "node scripts/install.mjs",
     "uninstall": "node scripts/install.mjs --uninstall",
     "mcp": "node src/mcp.js",
