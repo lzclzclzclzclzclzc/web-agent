@@ -14,7 +14,6 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 import { extname } from 'node:path';
 import { InteractionServer } from './engine.js';
 import { maybeRegisterMcpApps } from './mcp-apps.js';
@@ -44,7 +43,8 @@ function openBrowser(url) {
     const cmd = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
       : process.platform === 'darwin' ? ['open', [url]]
       : ['xdg-open', [url]];
-    spawn(cmd[0], cmd[1], { stdio: 'ignore', detached: true }).unref();
+    const child = spawn(cmd[0], cmd[1], { stdio: 'ignore', detached: true, windowsHide: true });
+    child.on('error', e => log('could not auto-open browser:', e.message)); child.unref();
   } catch (e) { log('could not auto-open browser:', e.message); }
 }
 
@@ -69,7 +69,7 @@ function themedPage(title, body) {
 }
 
 // ---- MCP server + tools ------------------------------------------------
-const server = new McpServer({ name: 'web-agent', version: '0.1.0' });
+const server = new McpServer({ name: 'web-agent', version: '0.2.0' });
 
 server.registerTool('open_panel', {
   title: 'Open the interaction panel',
@@ -78,7 +78,7 @@ server.registerTool('open_panel', {
 }, async () => {
   await ensureEngine();
   openBrowser(engine.url);
-  return { content: [{ type: 'text', text: urlLine() }] };
+  return { content: [{ type: 'text', text: `${urlLine()}\nBackground ingestion (do not put the token in page HTML): POST ${engine.ingest.url} with Authorization: Bearer ${engine.ingest.token}, JSON {channel,value}.` }] };
 });
 
 const chartsSchema = z.array(z.object({
@@ -92,7 +92,7 @@ server.registerTool('render', {
   inputSchema: {
     title: z.string().optional(),
     subtitle: z.string().optional(),
-    html: z.string().optional().describe('freehand HTML body (static; injected, scripts do NOT run)'),
+    html: z.string().optional().describe('freehand HTML body; rendered in an isolated sandbox, never in the host DOM'),
     htmlPath: z.string().optional().describe('path to an HTML fragment file to render'),
     doc: z.string().optional().describe('full custom interactive document body (runs in a sandboxed iframe; use the injected `webagent` bridge, see docs). For live custom viz, call webagent.onStream(cb).'),
     docPath: z.string().optional().describe('path to a custom document file to render in the sandboxed iframe'),
@@ -103,8 +103,8 @@ server.registerTool('render', {
   openBrowser(engine.url);
   const view = { ...args };
   try {
-    if (args.htmlPath) { view.html = readFileSync(args.htmlPath, 'utf8'); delete view.htmlPath; }
-    if (args.docPath) { view.doc = readFileSync(args.docPath, 'utf8'); delete view.docPath; }
+    if (args.htmlPath) { view.html = engine.readFile(args.htmlPath, 'utf8'); delete view.htmlPath; }
+    if (args.docPath) { view.doc = engine.readFile(args.docPath, 'utf8'); delete view.docPath; }
   } catch (e) { return { isError: true, content: [{ type: 'text', text: `Could not read path: ${e.message}` }] }; }
   engine.render(view);
   return { content: [{ type: 'text', text: `Rendered "${args.title || '(untitled)'}". ${urlLine()}` }] };
@@ -142,7 +142,7 @@ server.registerTool('ask', {
       enabled: z.boolean(),
       placeholder: z.string().optional(),
     }).optional(),
-    doc: z.string().optional().describe('full CUSTOM interactive document body; runs in a sandboxed iframe with its own JS. Design any interaction you like and call webagent.submit(value) with ANY JSON to answer (and/or webagent.onCollect(fn) so the global Submit button collects your value). This is the maximum-freedom path.'),
+    doc: z.string().optional().describe('Full custom interactive document in a sandboxed iframe with its own JS. You own the entire viewport and choose all layout, navigation and input. Provide your own button/interaction calling webagent.submit(value) with any JSON. There is no host composer or Submit button.'),
     docPath: z.string().optional().describe('path to a custom document file (e.g. written by the ui-author subagent)'),
     submitLabel: z.string().optional(),
   },
@@ -153,40 +153,40 @@ server.registerTool('ask', {
   // Normalize option ids to strings so the browser and answer agree.
   const spec = { ...args, options: (args.options || []).map((o, i) => ({ ...o, id: String(o.id ?? i) })) };
   if (args.docPath) {
-    try { spec.doc = readFileSync(args.docPath, 'utf8'); delete spec.docPath; }
+    try { spec.doc = engine.readFile(args.docPath, 'utf8'); delete spec.docPath; }
     catch (e) { return { isError: true, content: [{ type: 'text', text: `Could not read docPath: ${e.message}` }] }; }
   }
   const pending = engine.ask(spec);
 
   // Clean cancellation if the client aborts the tool call (e.g. timeout / user interrupt).
-  if (extra?.signal) {
-    if (extra.signal.aborted) engine.cancelPending('client aborted');
-    else extra.signal.addEventListener('abort', () => engine.cancelPending('client aborted'), { once: true });
-  }
+  const abort = () => engine.cancelPending('client aborted', pending.requestId);
+  if (extra?.signal?.aborted) abort();
+  else extra?.signal?.addEventListener('abort', abort, { once: true });
   // Best-effort keep-alive so long human think-time doesn't trip client timeouts.
   const beat = setInterval(() => {
-    try { extra?.sendNotification?.({ method: 'notifications/progress',
-      params: { progressToken: extra?._meta?.progressToken ?? 'web-agent', progress: 0 } }); } catch {}
+    if (extra?._meta?.progressToken !== undefined) Promise.resolve(extra.sendNotification?.({ method: 'notifications/progress',
+      params: { progressToken: extra._meta.progressToken, progress: 0 } })).catch(() => {});
   }, 15000);
 
   try {
     const answer = await pending;
-    const fieldKeys = answer.fields ? Object.keys(answer.fields).filter(k => k !== 'freetext-input') : [];
+    const fieldKeys = answer?.fields ? Object.keys(answer.fields).filter(k => k !== 'freetext-input') : [];
     const summary = [
-      answer.action ? `action: ${answer.action}` : null,
-      answer.selectedLabels?.length ? `selected: ${answer.selectedLabels.join(', ')}` : null,
+      answer?.action ? `action: ${answer.action}` : null,
+      answer?.selectedLabels?.length ? `selected: ${answer.selectedLabels.join(', ')}` : null,
       fieldKeys.length ? `fields: ${fieldKeys.map(k => `${k}=${answer.fields[k]}`).join(', ')}` : null,
-      answer.text ? `text: ${answer.text}` : null,
+      answer?.text ? `text: ${answer.text}` : null,
     ].filter(Boolean).join(' | ') || '(empty submission)';
     return { content: [{ type: 'text', text: `User submitted — ${summary}\n\n${JSON.stringify(answer)}` }] };
   } finally {
     clearInterval(beat);
+    extra?.signal?.removeEventListener('abort', abort);
   }
 });
 
 server.registerTool('stream', {
   title: 'Push a live datapoint',
-  description: 'Append a value to a chart channel that was declared via render({charts:[...]}). Does not block. For agent-independent live monitoring, an external process can instead POST {channel,value} to <url>/ingest.',
+  description: 'Append a numeric value to a chart channel declared via render({charts:[...]}). Does not block. For background metrics use the authenticated ingestion URL and token returned by open_panel; JSON values are accepted there.',
   inputSchema: {
     channel: z.string(),
     value: z.number(),
@@ -214,10 +214,10 @@ server.registerTool('route', {
   let contentType = args.contentType, body;
   try {
     if (args.filePath) {
-      body = readFileSync(args.filePath);
+      body = engine.readFile(args.filePath);
       contentType = contentType || CONTENT_TYPES[extname(args.filePath).toLowerCase()] || 'application/octet-stream';
     } else if (args.htmlPath) {
-      body = themedPage(args.title, readFileSync(args.htmlPath, 'utf8'));
+      body = themedPage(args.title, engine.readFile(args.htmlPath, 'utf8'));
       contentType = contentType || 'text/html; charset=utf-8';
     } else if (args.html != null) {
       body = themedPage(args.title, args.html);
@@ -234,7 +234,7 @@ server.registerTool('route', {
 
 server.registerTool('say', {
   title: 'Say something in the panel',
-  description: 'Show an agent message as the current panel screen (markdown-lite: **bold**, `code`). Non-blocking; the next render/ask/converse replaces it. Use to tell the user something in the browser instead of the terminal.',
+  description: 'Show an agent message as a new full-page interface. Non-blocking. Existing interfaces and input requests remain available via agent-designed navigation; there are no host tabs.',
   inputSchema: { text: z.string() },
 }, async (args) => {
   await ensureEngine();
@@ -245,24 +245,23 @@ server.registerTool('say', {
 
 server.registerTool('converse', {
   title: 'Ask a free-form chat question (blocking)',
-  description: 'Show a message with an inline text box, then BLOCK until the user sends a reply; returns { text }. This is the free-form conversation form — one of several interaction forms (use `ask` for choices/sliders/custom UI). Nothing accumulates: the screen is replaced on your next call.',
+  description: 'Show a message with a text box and BLOCK until the user replies; returns { text }. Existing interfaces remain available. Use ask for choices/sliders/custom UI.',
   inputSchema: { message: z.string().optional().describe('agent message shown above the input (omit to just show a box)') },
 }, async (args, extra) => {
   await ensureEngine();
   openBrowser(engine.url);
   const pending = engine.converse(args.message);
-  if (extra?.signal) {
-    if (extra.signal.aborted) engine.cancelPending('client aborted');
-    else extra.signal.addEventListener('abort', () => engine.cancelPending('client aborted'), { once: true });
-  }
+  const abort = () => engine.cancelPending('client aborted', pending.requestId);
+  if (extra?.signal?.aborted) abort();
+  else extra?.signal?.addEventListener('abort', abort, { once: true });
   const beat = setInterval(() => {
-    try { extra?.sendNotification?.({ method: 'notifications/progress',
-      params: { progressToken: extra?._meta?.progressToken ?? 'web-agent', progress: 0 } }); } catch {}
+    if (extra?._meta?.progressToken !== undefined) Promise.resolve(extra.sendNotification?.({ method: 'notifications/progress',
+      params: { progressToken: extra._meta.progressToken, progress: 0 } })).catch(() => {});
   }, 15000);
   try {
     const answer = await pending;
     return { content: [{ type: 'text', text: `User: ${answer?.text ?? ''}\n\n${JSON.stringify(answer)}` }] };
-  } finally { clearInterval(beat); }
+  } finally { clearInterval(beat); extra?.signal?.removeEventListener('abort', abort); }
 });
 
 // ---- boot --------------------------------------------------------------
