@@ -1,0 +1,10 @@
+<!doctype html><html><head><style>body{font:16px/1.8 'Segoe UI',sans-serif;padding:36px;background:#f8faf6;color:#345039}h1{font-weight:500}svg{width:90%;height:210px;border-bottom:1px solid #d5dfcf}#value{font:28px Consolas,monospace}</style></head><body><h1>训练指标 · 实时数据</h1><p>数据由独立进程推送，模型没有参与逐帧更新。</p><p id="value">等待指标…</p><svg viewBox="0 0 600 200"><polyline id="curve" fill="none" stroke="#477a46" stroke-width="3"/></svg><script>webagent.onStream(({channel,value,history})=>{if(channel!=='metrics')return;document.getElementById('value').textContent='epoch '+value.epoch+' / loss '+value.loss+' / F1 '+value.f1;document.getElementById('curve').setAttribute('points',history.map((x,i)=>[i*600/Math.max(1,history.length-1),190-Math.min(2,x.loss)*90].join(',')).join(' '));});</script><nav id="pages" aria-label="Agent 页面导航"></nav><script>
+webagent.onSession(session => {
+ const nav=document.getElementById('pages'); nav.replaceChildren();
+ for(const item of session.interfaces.filter(x=>x.status==='open')) {
+  const button=document.createElement('button'); button.textContent=item.title;
+  button.disabled=item.id===session.activeArtifactId;
+  button.onclick=()=>webagent.navigate(item.id).catch(e=>alert(e.message)); nav.append(button);
+ }
+});
+</script></body></html>

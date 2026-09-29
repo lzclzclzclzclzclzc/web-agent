@@ -1,0 +1,25 @@
+<!doctype html><html lang="zh-CN"><head><style>body{font:16px/1.7 'Segoe UI',sans-serif;padding:36px;color:#294037;background:#f5f7f0}h1{font-size:28px;font-weight:500}button{padding:12px 20px;border:1px solid #bdcbbb;border-radius:7px;background:white;cursor:pointer;margin:8px 12px 8px 0}button.selected{background:#305e45;color:white}textarea{display:block;width:90%;min-height:80px;margin:20px 0;border:1px solid #bdcbbb;border-radius:7px;padding:12px}#send{background:#305e45;color:white}small{color:#7c8b78}</style></head><body>
+<small>设计方向 / 01</small><h1>选择接下来要细化的方案</h1><p>你的选择和意见会作为结构化数据返回给 Agent。</p>
+<button id="a" type="button">方案 A · 清爽</button><button id="b" type="button">方案 B · 紧凑</button>
+<textarea id="feedback" aria-label="设计意见" placeholder="写下设计意见"></textarea><button id="send">确认方案</button><p id="status" role="status"></p>
+<script>
+let selected=webagent.state.selected||'A';const feedback=document.getElementById('feedback');feedback.value=webagent.state.feedback||'';
+const paint=()=>{document.getElementById('a').classList.toggle('selected',selected==='A');document.getElementById('b').classList.toggle('selected',selected==='B');};
+const save=()=>webagent.saveState({selected,feedback:feedback.value}).catch(e=>document.getElementById('status').textContent=e.message);
+document.getElementById('a').onclick=()=>{selected='A';paint();save();};document.getElementById('b').onclick=()=>{selected='B';paint();save();};feedback.oninput=save;paint();
+const collect=()=>({selected,feedback:feedback.value});webagent.onCollect(collect);
+webagent.onRequest(request=>{document.getElementById('send').disabled=!request;});
+document.getElementById('send').onclick=async()=>{try{await webagent.submit(collect());document.getElementById('status').textContent='已提交';}catch(e){document.getElementById('status').textContent=e.message;}};
+</script><nav id="pages" aria-label="Agent 页面导航"></nav><script>
+webagent.onSession(session => {
+ const nav=document.getElementById('pages'); nav.replaceChildren();
+ for(const item of session.interfaces.filter(x=>x.status==='open')) {
+  const button=document.createElement('button'); button.textContent=item.title;
+  button.disabled=item.id===session.activeArtifactId;
+  button.onclick=()=>webagent.navigate(item.id).catch(e=>alert(e.message)); nav.append(button);
+ }
+});
+</script><form id="next"><label for="next-message">下一步要求</label><textarea id="next-message"></textarea><button>继续这个对话</button></form><p id="next-status" role="status"></p><script>
+ const nextInput=document.getElementById('next-message');
+ document.getElementById('next').onsubmit=async(event)=>{event.preventDefault();const text=nextInput.value;try{await webagent.sendMessage(text);if(nextInput.value===text)nextInput.value='';document.getElementById('next-status').textContent='消息已发送';}catch(e){document.getElementById('next-status').textContent=e.message;}};
+ </script></body></html>

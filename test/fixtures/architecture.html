@@ -1,0 +1,12 @@
+<!doctype html><html lang="zh-CN"><head><style>body{font:16px/1.7 'Segoe UI',sans-serif;padding:36px;background:#fcfbf6;color:#394439}h1{font-size:28px;font-weight:500}svg{max-width:720px;width:100%}g{cursor:pointer}rect{fill:#edf3e6;stroke:#75916a}text{fill:#33472d;font-size:16px}textarea{display:block;width:85%;height:70px;padding:12px;border:1px solid #d4daca}button{margin-top:16px;background:#3e6042;color:white;border:0;padding:12px 20px;border-radius:6px}</style></head><body>
+<h1>架构评审</h1><p>选择节点，填写修改意见。</p><svg viewBox="0 0 700 150" aria-label="系统架构图"><path d="M150 75H550" stroke="#75916a"/><g id="client"><rect x="10" y="40" width="150" height="70" rx="8"/><text x="52" y="82">客户端</text></g><g id="api"><rect x="270" y="40" width="150" height="70" rx="8"/><text x="310" y="82">API 服务</text></g><g id="storage"><rect x="530" y="40" width="150" height="70" rx="8"/><text x="575" y="82">存储层</text></g></svg><p id="node">尚未选择节点</p><textarea id="comment" aria-label="架构意见"></textarea><button id="send">提交架构意见</button><p id="status"></p>
+<script>let node=webagent.state.node||null;const comment=document.getElementById('comment');comment.value=webagent.state.comment||'';const paint=()=>document.getElementById('node').textContent=node?'选中节点：'+node:'尚未选择节点';const save=()=>webagent.saveState({node,comment:comment.value});for(const id of ['client','api','storage'])document.getElementById(id).onclick=()=>{node=id;paint();save();};comment.oninput=save;paint();const collect=()=>({node,comment:comment.value});webagent.onCollect(collect);webagent.onRequest(r=>document.getElementById('send').disabled=!r);document.getElementById('send').onclick=()=>webagent.submit(collect()).then(()=>document.getElementById('status').textContent='已提交').catch(e=>document.getElementById('status').textContent=e.message);</script><nav id="pages" aria-label="Agent 页面导航"></nav><script>
+webagent.onSession(session => {
+ const nav=document.getElementById('pages'); nav.replaceChildren();
+ for(const item of session.interfaces.filter(x=>x.status==='open')) {
+  const button=document.createElement('button'); button.textContent=item.title;
+  button.disabled=item.id===session.activeArtifactId;
+  button.onclick=()=>webagent.navigate(item.id).catch(e=>alert(e.message)); nav.append(button);
+ }
+});
+</script></body></html>
